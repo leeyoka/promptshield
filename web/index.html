@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptShield — Privacy and Energy Gateway for Everyday AI Use</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-container">
+      <div class="brand">
+        <div class="brand-icon">🛡️</div>
+        <div class="brand-text">
+          <span class="brand-title">Prompt<strong>Shield</strong></span>
+          <span class="brand-tag">Techtonic 3.0 &bull; Team Open Minded</span>
+        </div>
+      </div>
+      <nav class="nav-links">
+        <a href="#simulator" class="nav-item active">Interactive Gateway</a>
+        <a href="#features" class="nav-item">Three Pillars</a>
+        <a href="#architecture" class="nav-item">Architecture</a>
+        <a href="#errc" class="nav-item">ERRC Grid</a>
+        <a href="#extension" class="nav-item nav-highlight">Get Chrome Extension</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-container">
+      <div class="hero-badge">
+        <span class="pulse-dot"></span> On-device &bull; Supports UU PDP practices &bull; Energy-aware
+      </div>
+      <h1 class="hero-title">
+        A Privacy and Energy Gateway <br>for <span class="gradient-text">Everyday AI Use</span>
+      </h1>
+      <p class="hero-subtitle">
+        PromptShield sits right in your browser between you and AI chat assistants. It pseudonymizes Indonesian NIK, phone numbers, cards, and credentials before transmission, restores answers on screen, and recommends right-sized models to save energy.
+      </p>
+
+      <!-- Key Metrics Row -->
+      <div class="hero-stats-row">
+        <div class="stat-pill">
+          <div class="stat-num">~11%</div>
+          <div class="stat-lbl">Pasted AI Data Confidential</div>
+        </div>
+        <div class="stat-pill">
+          <div class="stat-num">100%</div>
+          <div class="stat-lbl">On-Device (Zero Telemetry)</div>
+        </div>
+        <div class="stat-pill">
+          <div class="stat-num">0.24 Wh</div>
+          <div class="stat-lbl">Median Gemini Prompt Energy</div>
+        </div>
+        <div class="stat-pill highlight">
+          <div class="stat-num">AES-GCM</div>
+          <div class="stat-lbl">Encrypted local vault (24 h)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Live Simulator Section -->
+  <section id="simulator" class="sim-section">
+    <div class="section-container">
+      <div class="section-header">
+        <span class="section-badge">Live Demonstration</span>
+        <h2>Experience the PromptShield Gateway Live</h2>
+        <p>Test the exact three-stage workflow: <strong>Local Detection &rarr; AES-GCM Pseudonymization &rarr; Reversible Streaming Restoration &amp; Eco-Right-Sizing</strong>.</p>
+      </div>
+
+      <!-- Presets bar -->
+      <div class="preset-bar">
+        <span class="preset-label">Load test persona scenario:</span>
+        <button class="preset-btn active" id="btn-scenario-rina">
+          👩‍💼 Persona: Rina Sari (Bank Complaint with NIK &amp; Phone)
+        </button>
+        <button class="preset-btn" id="btn-scenario-dev">
+          👨‍💻 Persona: Small-Office Dev (OpenAI Key &amp; Card)
+        </button>
+        <button class="preset-btn" id="btn-scenario-clean">
+          🎓 Persona: Student (Clean Essay - Eco Test)
+        </button>
+      </div>
+
+      <!-- Dual Pane Simulator -->
+      <div class="simulator-grid">
+        <!-- Left: Prompt Composer & Gateway -->
+        <div class="sim-card">
+          <div class="sim-card-header">
+            <div class="card-title">
+              <span class="card-icon">✍️</span> 1. Prompt Composer (Client Browser)
+            </div>
+            <span class="status-chip active" id="composer-status">Monitoring Input</span>
+          </div>
+
+          <div class="composer-body">
+            <textarea id="live-composer" placeholder="Type or paste your prompt here with sensitive data (e.g. Indonesian NIK, Phone, Credit Card, or API Key)..."></textarea>
+
+            <!-- Document Upload Zone -->
+            <div class="doc-upload-zone" id="doc-upload-zone">
+              <input type="file" id="doc-file-input" accept=".txt,.csv,.pdf,.doc,.docx,.json,.xml,.html,.md,.log" multiple hidden>
+              <div class="doc-upload-droparea" id="doc-droparea">
+                <div class="doc-upload-icon">📄</div>
+                <div class="doc-upload-text">
+                  <strong>Upload Document to Shield</strong>
+                  <span>Drag & drop or click to browse — .txt, .csv, .pdf, .docx, .json, .md, .log</span>
+                </div>
+                <button class="btn-upload" id="btn-browse-file">Browse Files</button>
+              </div>
+              <div class="doc-file-list hidden" id="doc-file-list">
+                <div class="doc-file-list-header">
+                  <span>📎 <strong>Uploaded Documents</strong></span>
+                  <button class="btn-text" id="btn-clear-files">Clear All</button>
+                </div>
+                <div id="doc-file-items"></div>
+              </div>
+            </div>
+
+            <div class="composer-toolbar">
+              <div class="detection-counter" id="live-counter">
+                <span class="shield-dot"></span> <span id="counter-text">0 sensitive items detected</span>
+              </div>
+              <div class="toolbar-actions">
+                <button id="btn-clear-input" class="btn-text">Clear</button>
+                <button id="btn-send-prompt" class="btn-primary">
+                  <span>🔒 Send to AI</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Realtime Detection Badges -->
+          <div class="detected-chips-tray" id="chips-tray">
+            <span class="tray-empty">No sensitive entities detected yet. Try typing an Indonesian NIK or phone number!</span>
+          </div>
+
+          <!-- Eco Right-Sizing Suggestion Box -->
+          <div class="eco-suggestion-card hidden" id="eco-box">
+            <div class="eco-icon">🌿</div>
+            <div class="eco-details">
+              <div class="eco-title" id="eco-tier-text">Model Complexity: Small (0.12)</div>
+              <div class="eco-desc" id="eco-desc-text">This grammar/complaint task fits a Small model. Estimated energy saving: 0.16–0.98 Wh per prompt.</div>
+            </div>
+            <div class="eco-badge-tag" id="eco-tag">Eco Match</div>
+          </div>
+        </div>
+
+        <!-- Right: AI Chatbot Window & On-Screen Restoration -->
+        <div class="sim-card ai-window">
+          <div class="sim-card-header">
+            <div class="card-title">
+              <span class="card-icon">🤖</span> 2. AI Assistant (Streaming Reply &amp; Live Restoration)
+            </div>
+            <div class="ai-mode-tag" id="network-indicator">
+              <span class="wire-dot"></span> Wire: Encrypted Placeholders
+            </div>
+          </div>
+
+          <div class="chat-display" id="chat-messages">
+            <div class="msg-bubble assistant welcome">
+              <div class="msg-sender">PromptShield Guarded AI Session</div>
+              <div class="msg-content">
+                Welcome! Type or choose a preset prompt on the left. PromptShield will intercept sensitive data, mask it locally, send only placeholders across the network, and restore your real data inside this response.
+              </div>
+            </div>
+          </div>
+
+          <div class="wire-inspector">
+            <div class="wire-header">
+              <span>What would be sent to the AI (simulated, no network call):</span>
+              <span class="wire-badge">Placeholders only</span>
+            </div>
+            <pre class="wire-payload" id="wire-payload-text">Waiting for prompt submission...</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Realtime Impact Dashboard -->
+      <div class="impact-dashboard">
+        <div class="dashboard-header">
+          <h3>📊 Real-Time Local Impact Dashboard</h3>
+          <span class="dash-subtitle">Demo statistics for this page only (no telemetry)</span>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-val" id="metric-protected">0</div>
+            <div class="metric-title">Sensitive Entities Masked</div>
+            <div class="metric-foot">NIK, Phone, Cards, Keys, Email</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val" id="metric-energy">0.00 <span class="metric-unit">Wh</span></div>
+            <div class="metric-title">Cumulative Energy Saved</div>
+            <div class="metric-foot">Estimate from stated assumptions, not measured</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val" id="metric-rightsized">0</div>
+            <div class="metric-title">Prompts Right-Sized</div>
+            <div class="metric-foot">Assigned to Small / Medium tiers</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">Local</div>
+            <div class="metric-title">On-screen restore</div>
+            <div class="metric-foot">AI replies here are simulated; measured rates are in docs/METRICS.md</div>
+          </div>
+        </div>
+
+        <!-- Energy Savings Graph -->
+        <div class="energy-graph-section" id="energy-graph-section">
+          <div class="energy-graph-header">
+            <h4>⚡ Energy Savings History</h4>
+            <span class="energy-graph-subtitle">Per-prompt estimated energy savings (Wh)</span>
+          </div>
+          <div class="energy-bar-chart" id="energy-bar-chart">
+            <div class="energy-chart-empty" id="energy-chart-empty">
+              <span>No prompts analyzed yet. Send a prompt to see energy savings here.</span>
+            </div>
+            <div class="energy-bars-wrapper" id="energy-bars-wrapper"></div>
+            <div class="energy-chart-axis" id="energy-chart-axis">
+              <span>0 Wh</span>
+              <span>0.25 Wh</span>
+              <span>0.50 Wh</span>
+              <span>0.75 Wh</span>
+              <span>1.00 Wh</span>
+            </div>
+          </div>
+          <div class="energy-graph-legend">
+            <span class="legend-item"><span class="legend-dot legend-small"></span> Small tier</span>
+            <span class="legend-item"><span class="legend-dot legend-medium"></span> Medium tier</span>
+            <span class="legend-item"><span class="legend-dot legend-large"></span> Large tier (no saving)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Three Pillars Section -->
+  <section id="features" class="pillars-section">
+    <div class="section-container">
+      <div class="section-header">
+        <span class="section-badge">System Features</span>
+        <h2>The Three Pillars of PromptShield</h2>
+        <p>A unified privacy and energy gateway engineered for individuals, freelancers, and small offices.</p>
+      </div>
+
+      <div class="pillars-grid">
+        <div class="pillar-card">
+          <div class="pillar-icon-box navy">🔒</div>
+          <h3>On-Device Privacy &amp; Vault</h3>
+          <p>
+            Deterministic structural validators catch 16-digit Indonesian NIK (including province and +40 female birthdate offsets), Indonesian phone numbers, credit card Luhn checks, and Shannon entropy API keys. Raw data is encrypted with non-extractable AES-GCM-256 session keys.
+          </p>
+          <ul class="pillar-list">
+            <li>Indonesian NIK region &amp; date checks</li>
+            <li>In-browser Web Crypto AES-GCM encryption</li>
+            <li>Vault auto-cleared on session close</li>
+          </ul>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon-box green">⚡</div>
+          <h3>Seamless On-Screen Restoration</h3>
+          <p>
+            The AI chat provider only ever sees placeholder tokens such as <code>[NIK_1]</code> or <code>[PHONE_1]</code>. When the streamed response arrives, PromptShield's MutationObserver safely replaces placeholders in text nodes with your original values.
+          </p>
+          <ul class="pillar-list">
+            <li>Handles chunked streaming boundaries</li>
+            <li>Text-node only (immune to href injection)</li>
+            <li>Reversible without degrading AI output quality</li>
+          </ul>
+        </div>
+
+        <div class="pillar-card">
+          <div class="pillar-icon-box gold">🌿</div>
+          <h3>Energy Awareness &amp; Right-Sizing</h3>
+          <p>
+            Every prompt consumes electrical power. Based on research from Google and Luccioni et al., a lightweight complexity heuristic classifies your prompt (Small/Medium/Large) and nudges you toward right-sized models, saving up to ~1 Wh per prompt.
+          </p>
+          <ul class="pillar-list">
+            <li>Zero-latency mathematical heuristic</li>
+            <li>Visible energy savings per prompt</li>
+            <li>Cumulative carbon &amp; energy footprint tracker</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ERRC Blue Ocean Strategy Grid -->
+  <section id="errc" class="errc-section">
+    <div class="section-container">
+      <div class="section-header">
+        <span class="section-badge">Competitive Advantage</span>
+        <h2>Blue Ocean ERRC Matrix</h2>
+        <p>How PromptShield radically transforms the value curve compared to enterprise DLP and manual redaction.</p>
+      </div>
+
+      <div class="errc-grid">
+        <div class="errc-box eliminate">
+          <div class="errc-title">❌ ELIMINATE</div>
+          <ul>
+            <li>Server-side storage of raw sensitive values</li>
+            <li>Expensive enterprise licensing &amp; central IT admin</li>
+            <li>Developer-only Presidio SDK integration overhead</li>
+          </ul>
+        </div>
+        <div class="errc-box reduce">
+          <div class="errc-title">⬇️ REDUCE</div>
+          <ul>
+            <li>User effort from manual redaction to "review &amp; confirm"</li>
+            <li>False positive friction via interactive preview</li>
+            <li>Unnecessary electricity waste from oversized model defaults</li>
+          </ul>
+        </div>
+        <div class="errc-box raise">
+          <div class="errc-title">⬆️ RAISE</div>
+          <ul>
+            <li>Output usability via on-screen token restoration</li>
+            <li>Indonesia-specific detection accuracy (NIK validator)</li>
+            <li>Personal compliance with UU PDP (Law No. 27/2022)</li>
+          </ul>
+        </div>
+        <div class="errc-box create">
+          <div class="errc-title">🆕 CREATE</div>
+          <ul>
+            <li>Per-prompt energy-cost visibility at model selection</li>
+            <li>Zero-latency prompt complexity heuristic</li>
+            <li>Unified Privacy + Energy personal impact dashboard</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download & Install Chrome Extension -->
+  <section id="extension" class="download-section">
+    <div class="section-container">
+      <div class="download-card">
+        <div class="download-content">
+          <h2>Ready to Shield Your AI Prompts?</h2>
+          <p>
+            Load the PromptShield Chrome Extension directly in developer mode on any Chromium browser (Google Chrome, Brave, Edge).
+          </p>
+          <div class="install-steps">
+            <div class="step-item">
+              <span class="step-num">1</span>
+              <span>Open <code>chrome://extensions</code> in your browser</span>
+            </div>
+            <div class="step-item">
+              <span class="step-num">2</span>
+              <span>Enable <strong>Developer mode</strong> (toggle top right)</span>
+            </div>
+            <div class="step-item">
+              <span class="step-num">3</span>
+              <span>Click <strong>Load unpacked</strong> and select the <code>promptshield</code> folder</span>
+            </div>
+          </div>
+          <div class="folder-path-box">
+            <span>Extension Directory:</span>
+            <code>promptshield/</code> (the folder with manifest.json)
+          </div>
+        </div>
+        <div class="download-badge-area">
+          <div class="big-shield">🛡️</div>
+          <div class="team-cred">
+            <strong>Team Open Minded</strong><br>
+            Techtonic 3.0 Hackathon 2026<br>
+            IEEE Student Branch Universitas Indonesia
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="section-container footer-content">
+      <div class="footer-left">
+        <strong>PromptShield &bull; Team Open Minded</strong>
+        <p>Rafael Raditya Setyono (Lead Developer) &bull; Yohana Indah Nathania Br Sihotang &bull; Nayla Pramesti Adhina</p>
+      </div>
+      <div class="footer-right">
+        <span>UU PDP (Law No. 27 of 2022) Aligned</span>
+        <span>Green AI Computing</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Interception Modal for Simulator -->
+  <div class="sim-modal-overlay hidden" id="sim-modal">
+    <div class="sim-modal-box">
+      <div class="sim-modal-head">
+        <div class="modal-brand">
+          <span class="modal-icon">🛡️</span>
+          <div>
+            <h3>PromptShield Review &amp; Approval</h3>
+            <p>Sensitive data detected on your device before transmission</p>
+          </div>
+        </div>
+      </div>
+      <div class="sim-modal-body">
+        <div class="modal-sec-title">Highlighted Prompt (Items to Pseudonymize)</div>
+        <div class="modal-preview-box" id="modal-preview-text"></div>
+
+        <div class="modal-sec-title">Detected Identifiers (<span id="modal-finding-count">0</span>)</div>
+        <div class="modal-items-list" id="modal-items-container"></div>
+
+        <div class="modal-advice-banner" id="modal-advice-box">
+          <span class="adv-icon">🌿</span>
+          <div class="adv-text">
+            <strong>Energy Nudge:</strong> <span id="modal-advice-detail">A Small model is ideal for this task.</span>
+          </div>
+        </div>
+      </div>
+      <div class="sim-modal-foot">
+        <span class="modal-foot-info"><strong id="modal-approved-count">0</strong> items selected for local encryption</span>
+        <div class="modal-btn-row">
+          <button id="modal-btn-cancel" class="btn-cancel">Cancel</button>
+          <button id="modal-btn-raw" class="btn-raw">Send Plaintext</button>
+          <button id="modal-btn-shielded" class="btn-shield">🔒 Mask &amp; Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../promptshield/src/shared/constants.js"></script>
+  <script src="../promptshield/src/shared/detectors.js"></script>
+  <script src="../promptshield/src/shared/complexity.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
