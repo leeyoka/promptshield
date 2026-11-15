@@ -1,0 +1,10 @@
+{
+  "name": "promptshield",
+  "version": "1.2.2",
+  "private": true,
+  "description": "Chrome MV3 extension: local detection and reversible masking of sensitive data before prompts reach AI chatbots.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "eval": "node eval/run-all.js"
+  }
+}
