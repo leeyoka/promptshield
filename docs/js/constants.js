@@ -11,7 +11,11 @@ var PS_TYPES = {
   BANK_ACCOUNT: 'BANK_ACCOUNT',
   API_KEY: 'API_KEY',
   NAME: 'NAME',
-  PASSPORT: 'PASSPORT'
+  PASSPORT: 'PASSPORT',
+  FLIGHT_NUMBER: 'FLIGHT_NUMBER',
+  BOOKING_CODE: 'BOOKING_CODE',
+  IATA_AIRPORT: 'IATA_AIRPORT',
+  BOARDING_DATE: 'BOARDING_DATE'
 };
 
 /** Human labels per type (ID / EN). */
@@ -24,7 +28,11 @@ var PS_TYPE_LABELS = {
   BANK_ACCOUNT: { id: 'Rekening', en: 'Bank account' },
   API_KEY: { id: 'Kunci API', en: 'API key / secret' },
   NAME: { id: 'Nama', en: 'Name' },
-  PASSPORT: { id: 'No. Paspor', en: 'Passport number' }
+  PASSPORT: { id: 'No. Paspor', en: 'Passport number' },
+  FLIGHT_NUMBER: { id: 'Nomor Penerbangan', en: 'Flight number' },
+  BOOKING_CODE: { id: 'Kode Booking', en: 'Booking code (PNR)' },
+  IATA_AIRPORT: { id: 'Kode Bandara', en: 'Airport code' },
+  BOARDING_DATE: { id: 'Tanggal Penerbangan', en: 'Flight date' }
 };
 
 var PS_ACTIONS = {
@@ -95,7 +103,7 @@ var PS_ENERGY = {
 var PS_DEFAULTS = {
   enabledTypes: {
     NIK: true, NPWP: true, PHONE: true, EMAIL: true, CARD: true, BANK_ACCOUNT: true, API_KEY: true, NAME: true,
-    PASSPORT: true
+    PASSPORT: true, FLIGHT_NUMBER: true, BOOKING_CODE: true, IATA_AIRPORT: true, BOARDING_DATE: true
   },
   confidenceThreshold: 0.7,   // findings below this are listed unticked and never open the sheet alone
   rightSize: true,            // show right-size advice
@@ -115,7 +123,11 @@ var PS_COLORS = {
   BANK_ACCOUNT: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
   API_KEY: { bg: '#edebfe', border: '#5521b5', text: '#4a1d96' },
   NAME: { bg: '#e1effe', border: '#1a56db', text: '#1e429f' },
-  PASSPORT: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' }
+  PASSPORT: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
+  FLIGHT_NUMBER: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' },
+  BOOKING_CODE: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
+  IATA_AIRPORT: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' },
+  BOARDING_DATE: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' }
 };
 
 /** Indonesian document type labels for the image scanner feature. */
@@ -128,6 +140,10 @@ var PS_DOC_TYPES = {
   BUKU_REKENING: { id: 'Buku Rekening', en: 'Bank Passbook' },
   NPWP_CARD: { id: 'Kartu NPWP', en: 'Tax ID Card (NPWP)' },
   STR: { id: 'STR (Surat Tanda Registrasi)', en: 'Professional Registration Certificate' },
+  BOARDING_PASS: {
+    id: 'Boarding Pass', en: 'Boarding Pass',
+    keywords: ['boarding', 'gate', 'seat', 'flight', 'penerbangan', 'pesawat', 'depart']
+  },
   OTHER_SENSITIVE: { id: 'Dokumen Sensitif Lainnya', en: 'Other Sensitive Document' }
 };
 

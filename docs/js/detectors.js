@@ -72,6 +72,8 @@ const CTX = {
   card: /\b(kartu|card|cc|kredit|credit|debit|visa|mastercard|jcb|amex)\b/,
   bank: /\b(rekening|rek|norek|no\.?\s*rek|account|acc|a\/c|virtual account|va|bri|brimo|bca|bni|mandiri|bsi|btn|cimb|permata|danamon|ocbc|jago|seabank|transfer ke|tf ke)\b/,
   // Non-personal identifiers: lower confidence instead of auto-flagging.
+  booking: /\b(booking|pnr|kode|reservasi|konfirmasi|confirmation)\b/,
+  boarding: /\b(boarding|gate|seat|flight|penerbangan|pesawat|depart(?:ure)?|berangkat|keberangkatan|bandara|airport|maskapai|tiket|ticket)\b/,
   nonPersonal: /\b(order|pesanan|invoice|inv|resi|awb|tracking|lacak|transaksi|trx|txn|ref|referensi|booking|tiket|ticket|timestamp|serial|imei|sku|kode produk|nomor seri)\b/
 };
 
@@ -251,6 +253,83 @@ function detectApiKeys(text, out) {
 }
 
 // ---------------------------------------------------------------------------
+// Boarding pass data (flight number, booking code / PNR, airport code, DDMMM date).
+// ---------------------------------------------------------------------------
+/** Same-line text on both sides of a candidate, lower-cased. */
+function around(text, start, end, n = 60) {
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  let lineEnd = text.indexOf('\n', end);
+  if (lineEnd === -1) lineEnd = text.length;
+  return text.slice(Math.max(lineStart, start - n), Math.min(lineEnd, end + n)).toLowerCase();
+}
+
+const IATA_CODES = 'CGK|SUB|DPS|UPG|KNO|BPN|PLM|PDG|PKU|MDC|SOC|JOG|SRG|BDO|MLG|PNK|TIM|AMQ|GTO|MES|HLP|BTH|TKG|DJJ|MKQ|LOP|SIN|KUL|BKK|HKG';
+
+/**
+ * Indonesian airline flight numbers: QG 123, GA 456, JT-888, ID7788.
+ * The airline code must be upper-case so ordinary words ("in 2024", "id 12") are not flagged.
+ */
+function detectFlightNumber(text, out) {
+  const re = /\b(?:QG|GA|ID|JT|IW|IN|SJ|KD|XN|XT|IL)[ \-]?\d{1,4}\b/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const hit = CTX.boarding.test(around(text, m.index, m.index + m[0].length));
+    out.push(mk(PS_TYPES.FLIGHT_NUMBER, m, hit ? 0.92 : 0.75, hit ? 'flight-number+context' : 'flight-number'));
+  }
+}
+
+/**
+ * Booking code / PNR: 6 upper-case letters+digits, or 2-3 letters + 3-4 digits.
+ * High confidence only after "booking / PNR / kode / reservasi / konfirmasi" on the same line;
+ * a bare all-caps 6-char token is reported below the default threshold (listed unticked).
+ */
+function detectBookingCode(text, out) {
+  const re = /(?<![A-Za-z0-9])(?:[A-Z]{2,3}\d{3,4}|[A-Z0-9]{6})(?![A-Za-z0-9])/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const v = m[0];
+    if (!/[A-Z]/.test(v)) continue; // digit-only runs belong to the other detectors
+    if (CTX.booking.test(before(text, m.index, 40))) {
+      out.push(mk(PS_TYPES.BOOKING_CODE, m, 0.9, 'booking-code+context'));
+    } else if (v.length === 6) {
+      const mixed = /\d/.test(v);
+      out.push(mk(PS_TYPES.BOOKING_CODE, m, mixed ? 0.65 : 0.5, mixed ? 'booking-code-shape' : 'all-caps-6'));
+    }
+  }
+}
+
+/**
+ * Airport codes from a fixed list (upper-case only, so "sin"/"tim" in prose are ignored).
+ * Higher confidence inside a route ("CGK - DPS", "SUB→UPG") or near flight words.
+ */
+function detectIataAirport(text, out) {
+  const re = new RegExp(`\\b(?:${IATA_CODES})\\b`, 'g');
+  const route = new RegExp(`\\b(?:${IATA_CODES})\\s*(?:-|–|—|>|→|\\/|to|ke)\\s*(?:${IATA_CODES})\\b`, 'g');
+  const routes = [];
+  let r;
+  while ((r = route.exec(text)) !== null) {
+    routes.push([r.index, r.index + r[0].length]);
+    route.lastIndex = r.index + 3; // allow chained routes: CGK-DPS-LOP
+  }
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const inRoute = routes.some(([s, e]) => m.index >= s && m.index < e);
+    const hit = inRoute || CTX.boarding.test(around(text, m.index, m.index + m[0].length));
+    out.push(mk(PS_TYPES.IATA_AIRPORT, m, hit ? 0.85 : 0.6, hit ? 'iata+context' : 'iata'));
+  }
+}
+
+/** Boarding-pass date in DDMMM form: 19NOV, 25DEC, 01JAN. */
+function detectBoardingDate(text, out) {
+  const re = /\b(?:0[1-9]|[12]\d|3[01])(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const hit = CTX.boarding.test(around(text, m.index, m.index + m[0].length));
+    out.push(mk(PS_TYPES.BOARDING_DATE, m, hit ? 0.88 : 0.75, hit ? 'ddmmm+context' : 'ddmmm'));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Names (rule-based, Indonesian + English cues). Not NER — see docs/LIMITATIONS.md.
 // ---------------------------------------------------------------------------
 const NAME_W = "[A-Z][a-z'’]+(?:-[A-Za-z][a-z'’]+)?";
@@ -345,6 +424,10 @@ function psDetectAll(text, opts) {
   detectBankAccount(text, cands);
   detectApiKeys(text, cands);
   detectNames(text, cands);
+  detectFlightNumber(text, cands);
+  detectBookingCode(text, cands);
+  detectIataAirport(text, cands);
+  detectBoardingDate(text, cands);
   const enabled = opts && opts.enabledTypes;
   const filtered = enabled ? cands.filter((c) => enabled[c.type] !== false) : cands;
   return psResolveOverlaps(filtered);

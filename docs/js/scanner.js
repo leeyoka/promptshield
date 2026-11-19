@@ -77,6 +77,12 @@
       result_found_body: 'Pertimbangkan untuk menghapus atau menyamarkan data berikut sebelum mengirim ke AI.',
       result_doc: (d) => `${d} terdeteksi`,
       result_generic: 'Data sensitif terdeteksi',
+      result_toggle_body: 'Semua data disamarkan. Matikan sakelar untuk data yang boleh tetap terlihat.',
+      allowed_hint: 'Diizinkan', mask_this: 'Disamarkan', allow_this: 'Diizinkan (tidak disamarkan)',
+      copy_safe: 'Salin teks aman',
+      copy_done: (m, a) => `Tersalin. ${m} data dilindungi · ${a} diizinkan`,
+      copy_failed: 'Gagal menyalin. Tidak ada yang disalin; coba lagi.',
+      redact_covers: 'Versi aman sudah mencakup semua data di atas',
       visible_field: 'terlihat',
       redact_title: 'Versi dokumen yang aman:',
       redact_download: '⬇ Download versi aman',
@@ -147,6 +153,12 @@
       result_found_body: 'Consider removing or masking the following before sending to an AI.',
       result_doc: (d) => `${d} detected`,
       result_generic: 'Sensitive data detected',
+      result_toggle_body: 'Everything is masked. Switch off any item that may stay visible.',
+      allowed_hint: 'Allowed', mask_this: 'Masked', allow_this: 'Allowed (not masked)',
+      copy_safe: 'Copy safe text',
+      copy_done: (m, a) => `Copied. ${m} protected · ${a} allowed`,
+      copy_failed: 'Copy failed. Nothing was copied; try again.',
+      redact_covers: 'The safe version already covers all the data above',
       visible_field: 'visible',
       redact_title: 'Safe document version:',
       redact_download: '⬇ Download safe version',
@@ -285,9 +297,9 @@ Rekening BCA: 1234567890`;
       return;
     }
     const title = r.docType ? s.result_doc(docLabel(r.docType)) : n ? s.result_found(n) : s.result_generic;
-    const chips = r.findings.map((f) =>
-      `<li class="chip"><span class="chip-type">${esc(typeLabel(f.type))}</span><span class="chip-val">${esc(maskValue(f.value))}</span></li>`);
-    // Fields recognised from the document's printed labels (e.g. "Tempat/Tgl Lahir" on a KTP).
+    // Fields recognised from the document's printed labels (e.g. "Tempat/Tgl Lahir" on a KTP),
+    // for types the detectors did not already list.
+    const chips = [];
     const shown = new Set(r.findings.map((f) => typeLabel(f.type)));
     for (const key of r.fields || []) {
       const l = psDocScan.FIELD_LABELS[key];
@@ -296,10 +308,101 @@ Rekening BCA: 1234567890`;
       shown.add(label);
       chips.push(`<li class="chip"><span class="chip-type">${esc(label)}</span><span class="chip-val">${esc(s.visible_field)}</span></li>`);
     }
+    renderFindings(r, title, foot, chips);
+  }
+
+  // ── Results: one mask/allow switch per finding ───────────────────────────
+  // Every finding starts masked (switch ON). Switching one OFF lets that value through as-is;
+  // the same value elsewhere follows the same choice (never half-masked).
+  //   text, pdf: "Salin teks aman" copies the text with only the switched-ON findings replaced.
+  //   image: the downloadable photo is pixelated as a whole, so the switches only mark which
+  //          findings the user accepts; they do not change the safe photo.
+  const findingKey = (f) => f.type + '\u0000' + f.value;
+
+  function renderFindings(r, title, foot, chips) {
+    const s = S();
+    const isImage = r.source === 'image';
+    const canCopy = !isImage && typeof r.text === 'string' && r.findings.length > 0;
+    const rows = r.findings.map((f, i) => `
+      <li class="finding-row" data-index="${i}" data-type="${esc(f.type)}">
+        <div class="finding-left">
+          <span class="finding-head"><span class="finding-type">${esc(typeLabel(f.type))}</span><span class="finding-hint"></span></span>
+          <span class="finding-val"></span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="finding-toggle" role="switch" data-index="${i}">
+          <span class="toggle-track"></span>
+        </label>
+      </li>`).join('');
+    const body = isImage ? s.result_found_body : s.result_toggle_body;
+    const covers = isImage && rows && r.redaction && r.redaction.boxes;
     resultEl.innerHTML = `<div class="result warn"><div class="result-head">${ICONS.warn}<div>
-      <p class="result-title">${esc(title)}</p><p class="result-body">${esc(s.result_found_body)}</p></div></div>
-      <ul class="chips">${chips.join('')}</ul><div class="redact-slot"></div>${foot}</div>`;
-    if (r.source === 'image' && r.redaction !== undefined) renderRedaction(resultEl.querySelector('.redact-slot'), r);
+      <p class="result-title">${esc(title)}</p><p class="result-body">${esc(body)}</p></div></div>
+      ${isImage ? '<div class="redact-slot"></div>' : ''}
+      ${rows ? `<ul class="findings">${rows}</ul>` : ''}
+      ${chips.length ? `<ul class="chips">${chips.join('')}</ul>` : ''}
+      ${covers ? `<p class="redact-covers">${esc(s.redact_covers)}</p>` : ''}
+      ${canCopy ? `<div class="copy-safe">
+        <button type="button" class="btn btn-dark btn-sm" id="copy-safe">${esc(s.copy_safe)}</button>
+        <p class="copy-status" id="copy-safe-status" aria-live="polite"></p>
+      </div>` : ''}${foot}</div>`;
+    if (isImage && r.redaction !== undefined) renderRedaction(resultEl.querySelector('.redact-slot'), r);
+    const paintAll = () => resultEl.querySelectorAll('.finding-row').forEach((row) => paintFinding(r, row));
+    paintAll();
+    resultEl.querySelectorAll('.finding-toggle').forEach((sw) => sw.addEventListener('change', () => {
+      const it = r.findings[Number(sw.dataset.index)];
+      for (const f of r.findings) if (findingKey(f) === findingKey(it)) f.mask = sw.checked;
+      paintAll(); // in place, so keyboard focus stays on the switch
+      if (canCopy) $('copy-safe-status').textContent = '';
+    }));
+    if (canCopy) $('copy-safe').addEventListener('click', () => copySafeText(r));
+  }
+
+  function paintFinding(r, row) {
+    const s = S();
+    const f = r.findings[Number(row.dataset.index)];
+    const sw = row.querySelector('.finding-toggle');
+    sw.checked = f.mask;
+    row.classList.toggle('allowed', !f.mask);
+    row.querySelector('.finding-val').textContent = f.mask ? maskValue(f.value) : f.value;
+    row.querySelector('.finding-hint').textContent = f.mask ? '' : s.allowed_hint;
+    const tip = f.mask ? s.mask_this : s.allow_this;
+    row.querySelector('.toggle-switch').title = tip;
+    sw.setAttribute('aria-label', `${typeLabel(f.type)} ${maskValue(f.value)}: ${tip}`);
+  }
+
+  /** Text with only the switched-ON findings replaced by [TYPE_n] placeholders. */
+  function buildSafeText(r) {
+    const tokens = new Map();
+    const counters = {};
+    let out = '', cursor = 0;
+    for (const f of [...r.findings].sort((a, b) => a.start - b.start)) {
+      if (!f.mask || f.start < cursor) continue;
+      let t = tokens.get(findingKey(f));
+      if (!t) { counters[f.type] = (counters[f.type] || 0) + 1; t = `[${f.type}_${counters[f.type]}]`; tokens.set(findingKey(f), t); }
+      out += r.text.slice(cursor, f.start) + t;
+      cursor = f.end;
+    }
+    return out + r.text.slice(cursor);
+  }
+
+  async function copySafeText(r) {
+    const s = S();
+    const status = $('copy-safe-status');
+    const masked = r.findings.filter((f) => f.mask);
+    const safe = buildSafeText(r);
+    // Safety check: no value the user chose to mask may survive in what we copy.
+    // Also checks the original spelling: PDF/OCR findings can come from the digit-corrected text
+    // (O→0, I→1, one character for one), so the same span may read differently in r.text.
+    if (masked.some((f) => safe.includes(f.value) || safe.includes(r.text.slice(f.start, f.end)))) { status.textContent = s.copy_failed; status.dataset.kind = 'error'; return; }
+    try {
+      await navigator.clipboard.writeText(safe);
+      status.textContent = s.copy_done(masked.length, r.findings.length - masked.length);
+      status.dataset.kind = 'ok';
+    } catch (_) {
+      status.textContent = s.copy_failed;
+      status.dataset.kind = 'error';
+    }
   }
 
   // ── Photo redaction ──────────────────────────────────────────────────────
@@ -401,7 +504,8 @@ Rekening BCA: 1234567890`;
     if (!text.trim()) { clearResult(); textInput.focus(); return; }
     // Text: detector findings only. Document-type guessing is for photos/PDFs of whole documents;
     // on chat text a single "NIK ..." line would wrongly read as "KTP detected".
-    showResult({ kind: 'scan', source: 'text', findings: psDetectAll(text), docType: null, fields: [] });
+    const findings = psDetectAll(text).map((f) => ({ ...f, mask: true }));
+    showResult({ kind: 'scan', source: 'text', text, findings, docType: null, fields: [] });
   }
   $('text-scan').addEventListener('click', scanText);
   textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); scanText(); } });
@@ -574,7 +678,7 @@ Rekening BCA: 1234567890`;
     return {
       kind: 'scan',
       source,
-      findings: analysis.sensitive ? analysis.findings : [],
+      findings: analysis.sensitive ? analysis.findings.map((f) => ({ ...f, mask: true })) : [],
       docType: analysis.docType,
       fields: analysis.sensitive ? analysis.fields : []
     };
@@ -637,7 +741,7 @@ Rekening BCA: 1234567890`;
       }
       if (seq !== jobSeq) return;
       if (alnumCount(text) < 4) showResult({ kind: 'error', message: 'err_notext' });
-      else showResult(fileResult('pdf', analysis));
+      else showResult({ ...fileResult('pdf', analysis), text }); // text kept for "copy safe text"
     } catch (err) {
       if (seq !== jobSeq) return;
       const m = err && err.message;

@@ -43,6 +43,80 @@ textarea:focus { outline: 2px solid var(--ps-accent); outline-offset: -1px; }
 .badge { font-size: 11px; color: var(--ps-warn); background: var(--ps-warn-soft); border-radius: 4px; padding: 1px 6px; }
 .empty { margin: 0; }
 
+/* Per-finding rows: each detected item has its own mask (ON) / allow (OFF) switch. */
+#list { border-top: 0; margin-top: 8px; }
+.finding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  margin-bottom: 8px;
+  transition: background 150ms, border-color 150ms;
+}
+.finding-row.allowed { background: #f0fdf4; border-color: #bbf7d0; }
+.finding-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.finding-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.finding-type {
+  font: 600 11px/1.3 var(--ps-font);
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.finding-row.allowed .finding-type { color: #15803d; }
+.finding-hint { font: 500 11px/1.3 var(--ps-font); color: #15803d; }
+.finding-hint:empty { display: none; }
+.finding-val {
+  font: 500 13px/1.3 var(--ps-mono);
+  color: #c2410c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finding-row.allowed .finding-val { color: #15803d; text-decoration: line-through; opacity: 0.7; }
+
+/* Toggle switch */
+.toggle-switch { position: relative; flex: none; width: 40px; height: 22px; cursor: pointer; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track { position: absolute; inset: 0; border-radius: 100px; background: #d1d5db; transition: background 150ms; }
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: white;
+  top: 3px; left: 3px;
+  transition: transform 150ms;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch input:checked + .toggle-track { background: var(--ps-accent); }
+.toggle-switch input:checked + .toggle-track::after { transform: translateX(18px); }
+.toggle-switch input:focus-visible + .toggle-track { outline: 2px solid var(--ps-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .finding-row, .toggle-track, .toggle-track::after { transition: none; } }
+
+/* Dark theme: same meaning (orange = will be masked, green = allowed), darker surfaces. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .finding-row { background: rgba(234,88,12,.12); border-color: rgba(251,146,60,.35); }
+  :root:not([data-theme="light"]) .finding-row.allowed { background: rgba(22,163,74,.12); border-color: rgba(74,222,128,.35); }
+  :root:not([data-theme="light"]) .finding-type { color: #fdba74; }
+  :root:not([data-theme="light"]) .finding-val { color: #fb923c; }
+  :root:not([data-theme="light"]) .finding-row.allowed .finding-type,
+  :root:not([data-theme="light"]) .finding-row.allowed .finding-val,
+  :root:not([data-theme="light"]) .finding-hint { color: #86efac; }
+  :root:not([data-theme="light"]) .toggle-track { background: #4b5563; }
+}
+:root[data-theme="dark"] .finding-row { background: rgba(234,88,12,.12); border-color: rgba(251,146,60,.35); }
+:root[data-theme="dark"] .finding-row.allowed { background: rgba(22,163,74,.12); border-color: rgba(74,222,128,.35); }
+:root[data-theme="dark"] .finding-type { color: #fdba74; }
+:root[data-theme="dark"] .finding-val { color: #fb923c; }
+:root[data-theme="dark"] .finding-row.allowed .finding-type,
+:root[data-theme="dark"] .finding-row.allowed .finding-val,
+:root[data-theme="dark"] .finding-hint { color: #86efac; }
+:root[data-theme="dark"] .toggle-track { background: #4b5563; }
+
 .switch { appearance: none; -webkit-appearance: none; width: 36px; height: 22px; border-radius: 11px; background: var(--ps-bg-3); position: relative; cursor: pointer; flex: none; margin: 0; border: 1px solid var(--ps-line-2); transition: background var(--ps-dur) var(--ps-ease); }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform var(--ps-dur) var(--ps-ease); }
 .switch:checked { background: var(--ps-accent); border-color: var(--ps-accent); }

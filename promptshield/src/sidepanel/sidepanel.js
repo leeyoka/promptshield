@@ -17,10 +17,11 @@
       inputPh: 'Tempel teks yang mau kamu kirim ke AI (email, kontrak, data pelanggan, kode)…',
       sample: 'Contoh', clear: 'Hapus',
       detected: 'Terdeteksi', possible: 'mungkin',
+      allowedHint: 'Diizinkan', maskThis: 'Disamarkan', allowThis: 'Diizinkan (tidak disamarkan)',
+      copiedSummary: (m, a) => `Tersalin. ${m} data dilindungi · ${a} diizinkan. Tempel ke AI pilihanmu.`,
       noneFound: 'Tidak ada data sensitif terdeteksi.',
       viewOriginal: 'Asli', viewSafe: 'Versi aman',
       copySafe: 'Salin teks aman',
-      copiedN: (n) => `Tersalin. ${n} data diganti placeholder. Tempel ke AI pilihanmu.`,
       copiedNone: 'Tersalin. Tidak ada data sensitif terdeteksi.',
       copyFailed: 'Gagal menyalin. Tidak ada yang disalin; coba lagi.',
       chars: (n) => `${n.toLocaleString('id-ID')} karakter`,
@@ -49,10 +50,11 @@
       inputPh: 'Paste the text you want to send to an AI (email, contract, customer data, code)…',
       sample: 'Sample', clear: 'Clear',
       detected: 'Detected', possible: 'possible',
+      allowedHint: 'Allowed', maskThis: 'Masked', allowThis: 'Allowed (not masked)',
+      copiedSummary: (m, a) => `Copied. ${m} protected · ${a} allowed. Paste it into any AI.`,
       noneFound: 'No sensitive data found.',
       viewOriginal: 'Original', viewSafe: 'Safe version',
       copySafe: 'Copy safe text',
-      copiedN: (n) => `Copied. ${n} item(s) replaced with placeholders. Paste it into any AI.`,
       copiedNone: 'Copied. No sensitive data found.',
       copyFailed: 'Copy failed. Nothing was copied; try again.',
       chars: (n) => `${n.toLocaleString('en-US')} characters`,
@@ -145,14 +147,14 @@
     const text = input.value;
     $('char-count').textContent = text ? S.chars(text.length) : '';
     const findings = text.trim() ? psDetectAll(text, { enabledTypes: settings.enabledTypes }) : [];
+    // Every new finding starts masked (switch ON); the user's per-finding choice is kept
+    // for the same value while they keep editing. The same value is masked everywhere or
+    // nowhere, because the choice is keyed by type + value.
     items = findings.map((f, i) => ({
       ...f,
       id: i,
-      approved: overrides.has(keyOf(f)) ? overrides.get(keyOf(f)) : f.confidence >= settings.confidenceThreshold
+      approved: overrides.has(keyOf(f)) ? overrides.get(keyOf(f)) : true
     }));
-    // The same value is masked everywhere or nowhere (never half-masked).
-    const approvedKeys = new Set(items.filter((i) => i.approved).map(keyOf));
-    for (const i of items) if (!overrides.has(keyOf(i)) && approvedKeys.has(keyOf(i))) i.approved = true;
     renderList();
     renderPreview();
     renderAdvice(text);
@@ -165,26 +167,49 @@
     $('detect').hidden = items.length === 0;
     $('empty').hidden = !(items.length === 0 && text.trim().length >= 3);
     $('det-count').textContent = String(items.length);
+    // One row per finding: type + value on the left, its own mask/allow switch on the right.
     list.innerHTML = items.map((f) => `
-      <li class="row">
-        <label class="row-label" for="sw-${f.id}">
-          <span class="type">${esc(typeLabel(f.type))}</span>
-          <span class="val mono">${esc(psMasker.partialValue(f.value))}</span>
-          ${f.confidence < settings.confidenceThreshold ? `<span class="badge">${esc(S.possible)}</span>` : ''}
+      <li class="finding-row" data-index="${f.id}" data-type="${esc(f.type)}">
+        <div class="finding-left">
+          <span class="finding-head">
+            <span class="finding-type">${esc(typeLabel(f.type))}</span>
+            ${f.confidence < settings.confidenceThreshold ? `<span class="badge">${esc(S.possible)}</span>` : ''}
+            <span class="finding-hint"></span>
+          </span>
+          <span class="finding-val"></span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="finding-toggle" role="switch" data-id="${f.id}">
+          <span class="toggle-track"></span>
         </label>
-        <input id="sw-${f.id}" class="switch" type="checkbox" role="switch" data-id="${f.id}" ${f.approved ? 'checked' : ''}
-          aria-label="${esc(typeLabel(f.type))} ${esc(psMasker.partialValue(f.value))}">
       </li>`).join('');
-    list.querySelectorAll('.switch').forEach((sw) => sw.addEventListener('change', () => {
+    list.querySelectorAll('.finding-row').forEach(paintRow);
+    list.querySelectorAll('.finding-toggle').forEach((sw) => sw.addEventListener('change', () => {
       const it = items.find((i) => i.id === Number(sw.dataset.id));
       if (!it) return;
       overrides.set(keyOf(it), sw.checked);
-      // The same value elsewhere in the text follows the same choice.
+      // The same value elsewhere in the text follows the same choice. Rows are updated in
+      // place so keyboard focus stays on the switch.
       for (const other of items) if (keyOf(other) === keyOf(it)) other.approved = sw.checked;
-      renderList();
+      list.querySelectorAll('.finding-row').forEach(paintRow);
       renderPreview();
       setStatus(copyStatus, '');
     }));
+  }
+
+  /** ON = masked (partial value shown); OFF = allowed through (real value, "Diizinkan"). */
+  function paintRow(row) {
+    const f = items.find((i) => i.id === Number(row.dataset.index));
+    if (!f) return;
+    const sw = row.querySelector('.finding-toggle');
+    const shown = f.approved ? psMasker.partialValue(f.value) : f.value;
+    sw.checked = f.approved;
+    row.classList.toggle('allowed', !f.approved);
+    row.querySelector('.finding-val').textContent = shown;
+    row.querySelector('.finding-hint').textContent = f.approved ? '' : S.allowedHint;
+    const tip = f.approved ? S.maskThis : S.allowThis;
+    row.querySelector('.toggle-switch').title = tip;
+    sw.setAttribute('aria-label', `${typeLabel(f.type)} ${psMasker.partialValue(f.value)}: ${tip}`);
   }
 
   /** Tokens come from the encrypted vault (same token as in ChatGPT); page-local if unavailable. */
@@ -283,7 +308,8 @@
       const approvedValues = new Set(items.filter((i) => i.approved).map((i) => i.value));
       for (const v of approvedValues) if (r.masked.includes(v)) throw new Error('verify');
       await writeClipboard(r.masked);
-      setStatus(copyStatus, r.count ? S.copiedN(r.count) : S.copiedNone, 'ok');
+      const allowedN = items.length - items.filter((i) => i.approved).length;
+      setStatus(copyStatus, S.copiedSummary(r.count, allowedN), 'ok');
       recordPotential(input.value);
       if (r.count && lastRecordedSig !== r.sig) {
         lastRecordedSig = r.sig;
