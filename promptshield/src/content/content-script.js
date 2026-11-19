@@ -687,11 +687,12 @@
   // site's own handlers (React listens at its root, Angular on the element), holds them back,
   // scans the file, and then re-dispatches them with the original, the safe version, or nothing.
   // Covers every <input type="file"> in the page, including ones added later.
-  // Photos: the service worker cannot run Tesseract (no DOM, no Web Workers), so it relays the photo
-  // to the side panel, which ships the OCR engine; the panel returns each finding with its boxes and
-  // the dialog below pixelates only the findings the user keeps ON.
-  // PDFs: the service worker extracts the text with PDF.js and runs the detectors; the safe version
-  // is that text with the findings kept ON replaced by [TYPE_MASKED], uploaded as a .txt file.
+  // Scanning is automatic on every site (ChatGPT, Gemini, WhatsApp Web): the service worker hands the
+  // file to its offscreen document (src/offscreen/), which runs Tesseract OCR and PDF.js on the device.
+  // No side panel and no extra click are needed.
+  // Photos: each finding comes back with its boxes; the dialog pixelates only the findings kept ON.
+  // PDFs: text extraction AND OCR of every rendered page, findings merged; the safe version is the
+  // document text with the findings kept ON replaced by [TYPE_MASKED], uploaded as a .txt file.
   // ==========================================================================
   const UP_STR = {
     id: {
@@ -712,14 +713,11 @@
       wholePhoto: 'seluruh foto',
       pdfNote: 'Versi aman PDF dikirim sebagai file teks (.txt) berisi teks PDF dengan data yang disamarkan.',
       pdfMore: (n) => `… (${n} karakter lagi)`,
-      panelTitle: 'Pindai foto sebelum dikirim?',
-      panelBody: 'Pemindaian foto berjalan di panel samping PromptShield (OCR di perangkatmu, tanpa internet). Buka panel untuk memindai foto ini.',
-      panelScan: 'Buka panel & pindai',
+      scanTitle: 'Memeriksa foto sebelum dikirim',
       scanBody: 'PromptShield sedang memeriksa foto ini di perangkatmu. Foto belum dikirim.',
       pdfScanTitle: 'Memeriksa PDF sebelum dikirim',
-      pdfScanBody: 'PromptShield sedang membaca teks PDF ini di perangkatmu. PDF belum dikirim.',
+      pdfScanBody: 'PromptShield sedang membaca teks PDF ini dan memindai tiap halamannya (OCR) di perangkatmu. PDF belum dikirim.',
       skip: 'Kirim tanpa pemindaian',
-      panelFail: 'Panel tidak bisa dibuka otomatis. Tekan Alt+Shift+P, lalu pilih fotonya lagi.',
       errTitle: 'Foto tidak bisa dipindai',
       errBody: 'PromptShield tidak bisa memeriksa foto ini. Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
       pdfErrTitle: 'PDF tidak bisa dipindai',
@@ -744,14 +742,11 @@
       wholePhoto: 'whole photo',
       pdfNote: 'The safe version of a PDF is sent as a text file (.txt) holding the PDF text with the data masked.',
       pdfMore: (n) => `… (${n} more characters)`,
-      panelTitle: 'Scan this photo before sending?',
-      panelBody: 'Photo scanning runs in the PromptShield side panel (OCR on your device, no internet). Open the panel to scan this photo.',
-      panelScan: 'Open panel & scan',
+      scanTitle: 'Checking the photo before sending',
       scanBody: 'PromptShield is checking this photo on your device. It has not been sent yet.',
       pdfScanTitle: 'Checking the PDF before sending',
-      pdfScanBody: 'PromptShield is reading this PDF on your device. It has not been sent yet.',
+      pdfScanBody: 'PromptShield is reading the text of this PDF and scanning each page (OCR) on your device. It has not been sent yet.',
       skip: 'Send without scanning',
-      panelFail: 'The panel could not be opened automatically. Press Alt+Shift+P, then choose the photo again.',
       errTitle: 'Could not scan this photo',
       errBody: 'PromptShield could not check this photo. Make sure it holds no sensitive data before sending.',
       pdfErrTitle: 'Could not scan this PDF',
@@ -922,11 +917,6 @@
 
   const baseName = (name, fallback) => String(name || fallback).replace(/\.[^.]+$/, '') || fallback;
 
-  /** Ask the service worker to open the side panel. Must run synchronously inside a click (user gesture). */
-  function openPanelNow() {
-    try { chrome.runtime.sendMessage({ type: 'PS_OPEN_SIDE_PANEL' }, () => void chrome.runtime.lastError); } catch (_) { /* ignore */ }
-  }
-
   /** chrome.runtime.sendMessage for long scans (own timeout, typed failure). */
   function sendScan(msg, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -943,17 +933,20 @@
     });
   }
 
-  /** OCR one photo via service worker -> side panel. Resolves {hasPII, types, findings:[{type,value,boxes}], width, height}. */
-  async function scanImageViaPanel(file, waitForPanel) {
+  /** OCR one photo (service worker -> offscreen document). Resolves {hasPII, types, findings:[{type,value,boxes}], width, height}. */
+  async function scanImage(file) {
     const dataUrl = await readAsDataUrl(file);
     // First OCR loads the model, so allow a long time.
-    return sendScan({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, waitForPanel }, 180000);
+    return sendScan({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, lang }, 180000);
   }
 
-  /** Extract + scan one PDF in the service worker. Resolves {hasPII, findings:[{id,type,value,label,start,end}], text, safeText}. */
+  /**
+   * Scan one PDF (service worker -> offscreen document): text extraction + OCR of each page, merged.
+   * Resolves {hasPII, findings:[{id,type,value,label,confidence,sources,ranges}], text, safeText}.
+   */
   async function scanPdf(file) {
     const dataUrl = await readAsDataUrl(file);
-    return sendScan({ type: 'SCAN_PDF_FOR_PII', dataUrl, fileName: file.name }, 120000);
+    return sendScan({ type: 'SCAN_PDF_FOR_PII', dataUrl, fileName: file.name, lang }, 600000);
   }
 
   async function scanEach(files, fn) {
@@ -987,7 +980,7 @@
       const finish = (act) => { wrap.remove(); resolve(act); };
       for (const b of buttons) {
         wrap.querySelector(`[data-act="${b.act}"]`).addEventListener('click', () => {
-          if (b.onClickSync) b.onClickSync();          // e.g. open the side panel while the gesture is live
+          if (b.onClickSync) b.onClickSync();          // runs while the click's user gesture is live
           finish(b.act);
         });
       }
@@ -1040,7 +1033,7 @@
     let bitmap;
     try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
     catch (_) { bitmap = await createImageBitmap(file); }
-    // Boxes are in the side panel's pixels; normally identical, but scale if the decode differs.
+    // Boxes are in the scanner's pixels; normally identical, but scale if the decode differs.
     const sx = res.width ? bitmap.width / res.width : 1;
     const sy = res.height ? bitmap.height / res.height : 1;
     const items = (res.findings || []).map((f, i) => ({
@@ -1101,7 +1094,12 @@
     };
   }
 
-  /** PDF: the safe version is the extracted text with each finding switched ON replaced by [TYPE_MASKED]. */
+  /**
+   * PDF: the safe version is the document text (embedded text, or OCR text on scanned pages) with every
+   * occurrence of each finding switched ON replaced by [TYPE_MASKED]. Findings come from both text
+   * extraction and OCR; one found only by OCR inside an image on a text page has no occurrence in the
+   * text version, so it cannot leak through it either.
+   */
   function makePdfGroup(file, res) {
     const s = IS();
     const text = String(res.text || '');
@@ -1112,9 +1110,10 @@
       display: partialValue(f.value),
       lowConfidence: typeof f.confidence === 'number' && f.confidence < settings.confidenceThreshold,
       approved: true,
-      start: f.start, end: f.end, value: f.value
+      value: f.value,
+      ranges: Array.isArray(f.ranges) ? f.ranges : []
     }));
-    const safeText = () => psMasker.maskTyped(text, items);
+    const safeText = () => psPdfScan.maskText(text, items, (it) => it.approved);
     const PREVIEW_MAX = 1200;
     return {
       kind: 'pdf', file, items,
@@ -1226,33 +1225,12 @@
     });
   }
 
-  /** Scan photos via the side panel (opening it if needed). Resolves results, or null when the upload was settled. */
+  /** Scan photos automatically. Resolves results, or null when the upload was settled. */
   async function scanImages(src, images) {
     const s = IS();
-    const prompt = { title: s.panelTitle, sub: s.scanBody, spinner: s.scanning };
-    let outcome = await scanWithPrompt(() => scanEach(images, (f) => scanImageViaPanel(f, false)), prompt);
-
-    if (outcome.error && /panel_closed/.test(outcome.error.message)) {
-      // OCR lives in the side panel; ask before opening it (opening needs this click as a user gesture).
-      const act = await imageDialog({
-        title: s.panelTitle, sub: s.panelBody,
-        buttons: [
-          { act: 'scan', label: s.panelScan, cls: 'btn-primary', onClickSync: openPanelNow },
-          { act: 'cancel', label: s.cancel, cls: 'btn-secondary' },
-          { act: 'skip', label: s.skip, cls: 'btn-quiet-danger' }
-        ]
-      }).promise;
-      if (act === 'cancel') { src.cancel(); return null; }
-      if (act === 'skip') { src.release(); return null; }
-      outcome = await scanWithPrompt(() => scanEach(images, (f) => scanImageViaPanel(f, true)), prompt);
-      if (outcome.error && /panel_closed/.test(outcome.error.message)) {
-        src.cancel();
-        toast(s.panelFail, 'error', { duration: 9000 });
-        return null;
-      }
-    }
+    const outcome = await scanWithPrompt(() => scanEach(images, scanImage), { title: s.scanTitle, sub: s.scanBody, spinner: s.scanning });
     if (outcome.user) { if (outcome.user === 'skip') src.release(); else src.cancel(); return null; }
-    if (outcome.error) { await errorChoice(src, s.errTitle, s.errBody); return null; }
+    if (outcome.error) { dlog('image scan failed', outcome.error.message); await errorChoice(src, s.errTitle, s.errBody); return null; }
     return outcome.results;
   }
 

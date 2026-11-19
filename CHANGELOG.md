@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0 (20 Nov 2026)
+**Automatic upload scanning everywhere (incl. WhatsApp Web), and PDF scanning with text extraction + OCR.**
+- **No more "Open panel & scan" click.** Photo OCR used to run only in the side panel, so with the panel closed
+  (typical on WhatsApp Web) an upload stopped at a prompt that had to be clicked. Scans now run in a hidden
+  offscreen document (`src/offscreen/`, `offscreen` permission) that ships Tesseract, PDF.js and the detectors. On
+  ChatGPT, Gemini and WhatsApp Web a chosen, pasted or dropped photo/PDF is held back and scanned automatically,
+  then released, reviewed per finding, or blocked. One flow for every site; the side-panel relay was removed.
+- **PDFs: text extraction AND OCR.** Every page's text layer is read with PDF.js (`getTextContent`), and each page
+  (first 20) is rendered to a canvas and read with Tesseract, so scanned PDFs (e.g. a photographed KTP saved as PDF)
+  are caught too. Findings from both passes are merged and de-duplicated by type + canonical value, each tagged
+  with where it was found. The safe `.txt` uses the embedded text, or the OCR text on scanned pages, and masks
+  every occurrence of each item left ON.
+- The side panel scanner accepts PDFs too (same combined scan, safe `.txt` download).
+- OCR engine moved to `src/shared/ocr-engine.js` and the PDF scanner to `src/shared/pdf-scan.js` (shared by the
+  offscreen document and the side panel). Rendered PDF pages get a clean, unprocessed OCR pass first (the photo
+  contrast stretch can wash out text on a mostly-white page). Tests: `tests/pdf-scan.test.js`.
+
 ## 1.3.0 (19 Nov 2026)
 **Per-finding upload review, PDF screening, and WhatsApp Web.**
 - **Per-finding switches in the upload popup.** After a photo is scanned, every detected item is listed with its own

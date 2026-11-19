@@ -529,9 +529,17 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   const SCAN_STR = {
     id: {
       scanTitle: 'Pindai dokumen foto',
-      scanHint: 'Jatuhkan atau pilih foto dokumen (KTP, Paspor, KK, SIM, BPJS, Buku Rekening, dll.) untuk memeriksa data sensitif di dalamnya.',
-      scanDrop: 'Jatuhkan foto di sini atau klik untuk memilih',
-      scanDropSub: 'JPG / PNG / WEBP',
+      scanHint: 'Jatuhkan atau pilih foto dokumen (KTP, Paspor, KK, SIM, BPJS, Buku Rekening, dll.) atau PDF untuk memeriksa data sensitif di dalamnya.',
+      scanDrop: 'Jatuhkan foto/PDF di sini atau klik untuk memilih',
+      scanDropSub: 'JPG / PNG / WEBP / PDF',
+      pdfScanning: (p, n) => `Membaca teks & memindai halaman ${p}/${n} (OCR)… (proses lokal)`,
+      pdfWarnBody: 'Jangan unggah PDF ini ke AI. Data sensitif ditemukan lewat teks PDF dan/atau OCR halaman.',
+      pdfOkBody: 'Tidak ada data sensitif yang terdeteksi, baik di teks PDF maupun lewat OCR halamannya.',
+      pdfNoText: 'Teks tidak terbaca dari PDF ini (teks maupun OCR).',
+      pdfErr: 'PDF tidak bisa dibaca (mungkin terkunci, rusak, atau terlalu besar).',
+      pdfDownload: '⬇ Download versi teks aman (.txt)',
+      pdfOcrLimit: (n) => `OCR hanya untuk ${n} halaman pertama; halaman berikutnya diperiksa lewat teksnya saja.`,
+      srcText: 'teks', srcOcr: 'OCR',
       scanScanning: 'Membaca teks dari foto… (proses lokal, tidak ada data dikirim)',
       onDevice: 'Diproses 100% di perangkat kamu · tanpa API · tanpa internet',
       warnBody: 'Jangan unggah foto ini ke AI. Data sensitif di dalamnya bisa terbaca oleh model.',
@@ -546,9 +554,17 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     },
     en: {
       scanTitle: 'Scan document photo',
-      scanHint: 'Drop or choose a document photo (KTP, Passport, KK, SIM, BPJS, Bank Passbook, etc.) to check for sensitive data.',
-      scanDrop: 'Drop a photo here or click to choose',
-      scanDropSub: 'JPG / PNG / WEBP',
+      scanHint: 'Drop or choose a document photo (KTP, Passport, KK, SIM, BPJS, Bank Passbook, etc.) or a PDF to check for sensitive data.',
+      scanDrop: 'Drop a photo/PDF here or click to choose',
+      scanDropSub: 'JPG / PNG / WEBP / PDF',
+      pdfScanning: (p, n) => `Reading text & scanning page ${p}/${n} (OCR)… (local processing)`,
+      pdfWarnBody: 'Do not upload this PDF to an AI. Sensitive data was found in its text and/or by OCR of its pages.',
+      pdfOkBody: 'No sensitive data detected, neither in the PDF text nor by OCR of its pages.',
+      pdfNoText: 'No text could be read from this PDF (text layer or OCR).',
+      pdfErr: 'Could not read this PDF (it may be locked, damaged or too large).',
+      pdfDownload: '⬇ Download safe text version (.txt)',
+      pdfOcrLimit: (n) => `OCR covers the first ${n} pages; later pages are checked through their text only.`,
+      srcText: 'text', srcOcr: 'OCR',
       scanScanning: 'Reading text from photo… (local processing, nothing is sent anywhere)',
       onDevice: '100% on-device · no API · no internet needed',
       warnBody: 'Do not upload this photo to an AI. The sensitive data inside can be read by the model.',
@@ -579,87 +595,9 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   const imgResult   = $('ps-img-result');
   const imgScanning = $('ps-img-scanning');
 
-  // ── Tesseract worker (created once, reused) ────────────────────────────────
-  // workerBlobURL:false — MV3 CSP forbids blob: scripts, so the worker loads straight
-  // from the extension package. corePath/langPath point at bundled files so nothing
-  // is fetched from a CDN.
-  const extUrl = (p) => (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
-    ? chrome.runtime.getURL(p)
-    : '../../' + p;
-
-  let _tWorker = null;
-
-  async function getTesseractWorker() {
-    if (_tWorker) return _tWorker;
-    _tWorker = Tesseract.createWorker(['ind', 'eng'], 1, {
-      workerPath: extUrl('lib/worker.min.js'),
-      corePath: extUrl('lib/core'),
-      langPath: extUrl('lib/lang'),
-      workerBlobURL: false,
-      logger: () => {}
-    });
-    try {
-      return await _tWorker;
-    } catch (err) {
-      _tWorker = null; // allow a retry on the next scan
-      throw err;
-    }
-  }
-
-  // ── Image preparation (all on-device, via canvas) ──────────────────────────
-  // Phone photos of ID cards are hard for OCR: small text, coloured security patterns, glare,
-  // and sideways shots. Each pass upscales the photo, removes the background pattern
-  // (psDocScan.enhance), optionally applies an adaptive threshold, and can rotate it.
-  const OCR_TARGET_PX = 2400;            // longest side after scaling
-  const OCR_PASSES = [
-    { rot: 0, mode: 'gray' },
-    { rot: 90, mode: 'gray' },           // portrait shot of a landscape card
-    { rot: 270, mode: 'gray' },
-    { rot: 0, mode: 'bin' },             // heavy glare / low contrast
-    { rot: 180, mode: 'gray' }
-  ];
-  const OCR_CONFIDENT = 75;              // a pass this confident that finds nothing ends the scan
-
-  async function loadBitmap(file) {
-    if (typeof createImageBitmap === 'function') {
-      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) { /* fall back */ }
-    }
-    const url = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.src = url;
-      await img.decode();
-      return img;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
-
-  const variantScale = (bitmap) => Math.min(3, Math.max(0.5, OCR_TARGET_PX / Math.max(bitmap.width, bitmap.height)));
-
-  function makeVariant(bitmap, rot, mode) {
-    const w0 = bitmap.width, h0 = bitmap.height;
-    const scale = variantScale(bitmap);
-    const w = Math.round(w0 * scale), h = Math.round(h0 * scale);
-    const swap = rot === 90 || rot === 270;
-    const canvas = document.createElement('canvas');
-    canvas.width = swap ? h : w;
-    canvas.height = swap ? w : h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((rot * Math.PI) / 180);
-    ctx.drawImage(bitmap, -w / 2, -h / 2, w, h);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    psDocScan.enhance(img);
-    if (mode === 'bin') psDocScan.binarize(img);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.putImageData(img, 0, 0);
-    return canvas;
-  }
-
-  const alnumCount = (s) => (String(s).match(/[A-Za-z0-9]/g) || []).length;
+  // OCR engine (Tesseract worker, multi-pass preparation): src/shared/ocr-engine.js, shared with
+  // the offscreen document that scans uploads on ChatGPT / Gemini / WhatsApp Web.
+  const alnumCount = psOcr.alnumCount;
 
   // ── Drag & drop ────────────────────────────────────────────────────────────
   imgDrop.addEventListener('click', () => imgInput.click());
@@ -671,12 +609,12 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     e.preventDefault();
     imgDrop.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file) handleImageFile(file);
+    if (file) handleFile(file);
   });
 
   imgInput.addEventListener('change', () => {
     const file = imgInput.files[0];
-    if (file) handleImageFile(file);
+    if (file) handleFile(file);
     imgInput.value = ''; // reset so the same file can be re-selected
   });
 
@@ -816,26 +754,15 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     let analysis = null;
     let allText = '';
     let bitmap = null;
-    const passes = [];                   // word boxes per OCR pass, to locate each finding later
+    let passes = [];                     // word boxes per OCR pass, to locate each finding later
     try {
-      let worker;
-      [worker, bitmap] = await Promise.all([getTesseractWorker(), loadBitmap(file)]);
-      let emptyPasses = 0;
-      for (let i = 0; i < OCR_PASSES.length; i++) {
-        if (seq !== scanSeq) { if (bitmap.close) bitmap.close(); return { status: 'cancelled' }; }
-        const { rot, mode } = OCR_PASSES[i];
-        if (i > 0) imgScanning.textContent = ss.scanStep(i + 1, OCR_PASSES.length);
-        const { data } = await worker.recognize(makeVariant(bitmap, rot, mode), {}, { text: true, blocks: true });
-        const text = (data && data.text) || '';
-        const scale = variantScale(bitmap);
-        passes.push({ rot, scale, w: Math.round(bitmap.width * scale), h: Math.round(bitmap.height * scale), words: psImageRedact.wordsFromTesseract(data) });
-        allText += '\n' + text;
-        analysis = psDocScan.analyze(allText, (typeof psDetectAll === 'function') ? psDetectAll : null);
-        if (analysis.sensitive || analysis.findings.some((f) => f.type !== 'NAME')) break;
-        if (alnumCount(text) < 4) { if (++emptyPasses >= 2) break; continue; }
-        // Read cleanly and found nothing sensitive: the photo is upright and simply not a document.
-        if ((data.confidence || 0) >= OCR_CONFIDENT && alnumCount(text) >= 20) break;
-      }
+      bitmap = await psOcr.loadBitmap(file);
+      const r = await psOcr.ocrImage(bitmap, {
+        isCancelled: () => seq !== scanSeq,
+        onStep: (i, n) => { imgScanning.textContent = ss.scanStep(i, n); }
+      });
+      if (r.cancelled) { if (bitmap.close) bitmap.close(); return { status: 'cancelled' }; }
+      ({ analysis, allText, passes } = r);
     } catch (err) {
       if (bitmap && typeof bitmap.close === 'function') bitmap.close();
       if (seq !== scanSeq) return { status: 'cancelled' };
@@ -858,21 +785,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     // name, … plus a recognised ID document even when OCR could not read its number cleanly.
     const hasPII = analysis.sensitive || analysis.findings.length > 0;
     if (hasPII) {
-      let docLabel = '';
-      if (analysis.docType) {
-        const docInfo = (typeof PS_DOC_TYPES !== 'undefined' && PS_DOC_TYPES[analysis.docType]);
-        docLabel = docInfo ? (lang === 'id' ? docInfo.id : (docInfo.en || docInfo.id)) : analysis.docType;
-      }
-      const labels = [];
-      for (const key of analysis.fields) {
-        const l = psDocScan.FIELD_LABELS[key];
-        if (l) labels.push(l[lang] || l.id);
-      }
-      for (const f of analysis.findings) {
-        const info = (typeof PS_TYPE_LABELS !== 'undefined' && PS_TYPE_LABELS[f.type]);
-        labels.push(info ? (lang === 'id' ? info.id : info.en) : f.type);
-      }
-      const fieldLabels = [...new Set(labels)];
+      const { docLabel, labels: fieldLabels } = psOcr.describe(analysis, lang);
       const title = docLabel
         ? (lang === 'id' ? `⚠️ ${docLabel} terdeteksi` : `⚠️ ${docLabel} detected`)
         : (lang === 'id' ? '⚠️ Data sensitif terdeteksi' : '⚠️ Sensitive data detected');
@@ -907,41 +820,77 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   }
 
 
-  // ── Scan requests from ChatGPT / Gemini / WhatsApp Web (relayed by the service worker) ────
-  // The content script holds an upload back while the photo is scanned here with the same OCR
-  // pipeline; the findings and where they sit in the photo go back the same way, and the page
-  // pixelates only the findings the user keeps switched on.
-  async function scanForPage(msg) {
-    const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/i.exec(String(msg.dataUrl || ''));
-    if (!m) return { success: false, error: 'bad_image' };
-    const bin = atob(m[2]);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const file = new File([bytes], String(msg.fileName || 'image'), { type: m[1] });
-    const r = await handleImageFile(file);
-    if (!r || r.status === 'cancelled') return { success: false, error: 'cancelled' };
-    if (r.status === 'error') return { success: false, error: 'ocr_failed' };
-    // No readable text (a landscape, a meme, …) or nothing sensitive: let it through.
-    if (r.status !== 'pii') return { success: true, hasPII: false, types: [] };
-    // Per-finding boxes (photo pixels): the page lets the user choose what to pixelate.
-    return {
-      success: true, hasPII: true,
-      types: r.labels || [],
-      docType: r.docType || null,
-      docLabel: r.docLabel || '',
-      findings: r.findings || [],
-      width: r.size ? r.size.width : 0,
-      height: r.size ? r.size.height : 0
-    };
+  // ── PDF: text extraction + OCR of every page, findings merged (src/shared/pdf-scan.js) ──────
+  async function handlePdfFile(file) {
+    const ss = SCAN_STR[lang] || SCAN_STR.id;
+    const seq = ++scanSeq;
+    imgResult.hidden = true;
+    imgResult.innerHTML = '';
+    imgPreview.hidden = true;
+    imgPreview.removeAttribute('src');
+    imgScanning.textContent = ss.pdfScanning(1, 1);
+    imgScanning.hidden = false;
+
+    let r;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const st = settings || {};
+      r = await psPdfScan.scan(bytes, {
+        enabledTypes: st.enabledTypes,
+        confidenceThreshold: st.confidenceThreshold,
+        lang,
+        onPage: (p, n) => { if (seq === scanSeq) imgScanning.textContent = ss.pdfScanning(p, n); }
+      });
+    } catch (_) {
+      if (seq !== scanSeq) return;
+      imgScanning.hidden = true;
+      showResult('err', ss.pdfErr, '');
+      return;
+    }
+    if (seq !== scanSeq) return;
+    imgScanning.hidden = true;
+
+    if (!r.findings.length) {
+      const empty = alnumCount(r.text) < 4;
+      showResult(empty ? 'err' : 'ok', empty ? ss.pdfNoText : (lang === 'id' ? '✅ Tidak ada data sensitif' : '✅ No sensitive data found'), empty ? '' : ss.pdfOkBody, []);
+    } else {
+      const title = lang === 'id' ? '⚠️ Data sensitif terdeteksi di PDF' : '⚠️ Sensitive data detected in PDF';
+      showResult('warn', title, ss.pdfWarnBody, [...new Set(r.findings.map((f) => f.label))]);
+      const ul = document.createElement('ul');
+      ul.className = 'img-pdf-findings small';
+      for (const f of r.findings) {
+        const li = document.createElement('li');
+        const src = f.sources.map((x) => (x === 'ocr' ? ss.srcOcr : ss.srcText)).join(' + ');
+        li.textContent = `${f.label}: ${psMasker.partialValue(f.value)} (${src})`;
+        ul.appendChild(li);
+      }
+      imgResult.appendChild(ul);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = ss.pdfDownload;
+      btn.addEventListener('click', () => {
+        const url = URL.createObjectURL(new Blob([r.safeText], { type: 'text/plain' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'safe_' + (String(file.name || 'document').replace(/\.[^.]+$/, '') || 'document') + '.txt';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      });
+      imgResult.appendChild(btn);
+    }
+    if (r.pages > psPdfScan.MAX_OCR_PAGES) {
+      const note = document.createElement('p');
+      note.className = 'muted small';
+      note.textContent = ss.pdfOcrLimit(psPdfScan.MAX_OCR_PAGES);
+      imgResult.appendChild(note);
+    }
   }
 
-  if (hasChrome && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      // Only from our own service worker (never directly from a web page's content script).
-      if (!msg || msg.type !== 'PS_PANEL_SCAN_IMAGE' || sender.tab || sender.id !== chrome.runtime.id) return false;
-      scanForPage(msg).then(sendResponse, () => sendResponse({ success: false, error: 'scan_failed' }));
-      return true;
-    });
+  function handleFile(file) {
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    return isPdf ? handlePdfFile(file) : handleImageFile(file);
   }
 
   // Apply scanner i18n once languages are loaded.

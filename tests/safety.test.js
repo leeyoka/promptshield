@@ -30,8 +30,11 @@ test('no console.log/info/warn/error in shipped code (DEBUG-gated console.debug 
   assert.match(sw, /const DEBUG = false;/);
 });
 
-test('manifest: storage + sidePanel only, no host permissions, no remote code', () => {
-  assert.deepEqual(manifest.permissions, ['storage', 'sidePanel']);
+test('manifest: storage + sidePanel + offscreen only, no host permissions, no remote code', () => {
+  // offscreen: a hidden extension page that runs the on-device OCR / PDF scan for uploads
+  // (the service worker cannot start Web Workers). It grants no access to pages or data.
+  assert.deepEqual(manifest.permissions, ['storage', 'sidePanel', 'offscreen']);
+  assert.ok(fs.existsSync(path.join(EXT, 'src/offscreen/offscreen.html')), 'offscreen page exists');
   assert.ok(fs.existsSync(path.join(EXT, manifest.side_panel.default_path)), 'side panel page exists');
   assert.ok(manifest.commands['open-side-panel'], 'shortcut declared');
   assert.equal(manifest.host_permissions, undefined);

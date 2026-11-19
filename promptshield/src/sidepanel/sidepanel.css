@@ -370,3 +370,4 @@ mark.rest { background: var(--ps-mark); border-bottom: 1.5px dotted var(--ps-acc
   font-weight: 600;
 }
 #downloadRedacted:hover { background: #1533a8; }
+.img-pdf-findings { margin: 8px 0; padding-left: 18px; line-height: 1.5; }

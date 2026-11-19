@@ -6,6 +6,8 @@
   <title>PromptShield</title>
   <link rel="stylesheet" href="sidepanel.css">
   <script src="../../lib/tesseract.min.js"></script>
+  <script src="../../lib/pdfjs/pdf.min.js"></script>
+  <script src="../../lib/pdfjs/pdf.worker.min.js"></script>
 </head>
 <body>
   <header class="top">
@@ -96,7 +98,7 @@
           <span class="img-drop-label" data-i18n="scanDrop"></span>
           <span class="img-drop-sub muted small" data-i18n="scanDropSub"></span>
         </div>
-        <input type="file" id="ps-img-input" accept="image/*" tabindex="-1"
+        <input type="file" id="ps-img-input" accept="image/*,application/pdf,.pdf" tabindex="-1"
                aria-hidden="true" style="display:none">
       </div>
 
@@ -147,6 +149,8 @@
   <script src="../shared/masker.js"></script>
   <script src="../shared/doc-scan.js"></script>
   <script src="../shared/image-redact.js"></script>
+  <script src="../shared/ocr-engine.js"></script>
+  <script src="../shared/pdf-scan.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

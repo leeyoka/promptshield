@@ -7,14 +7,6 @@ importScripts('/src/shared/constants.js', '/src/shared/masker.js', '/src/backgro
 const DEBUG = false;
 function dlog(...a) { if (DEBUG) console.debug('[PromptShield SW]', ...a); }
 
-// PDF text extraction (SCAN_PDF_FOR_PII). MV3 only allows importScripts while the worker starts, so
-// PDF.js is loaded here. If it fails to load, PDF scans answer with an error and the page fails closed.
-try {
-  importScripts('/src/shared/detectors.js', '/lib/pdfjs/pdf.min.js', '/lib/pdfjs/pdf.worker.min.js', '/src/background/pdf-scan.js');
-} catch (e) {
-  dlog('PDF scanner unavailable:', e && e.message);
-}
-
 const EMPTY_STATS = () => ({
   totalItemsProtected: 0,
   byType: {},
@@ -88,31 +80,44 @@ function record(update) {
   return statsQueue;
 }
 
-// ── Photo scan relay ────────────────────────────────────────────────────────
-// A service worker has no DOM and cannot start Web Workers, so Tesseract.js cannot run here.
-// The side panel already ships the OCR engine + language data and the pixelation code, so the
-// photo is relayed to it (extension-internal messaging only, nothing leaves the device).
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// ── Upload scans (photos + PDFs) ────────────────────────────────────────────
+// A service worker has no DOM and cannot start Web Workers, so Tesseract.js and PDF page rendering
+// cannot run here. Scans go to a hidden offscreen document (src/offscreen/) that ships the OCR engine,
+// PDF.js and the detectors: automatic on every supported site, no side panel and no click needed.
+// Extension-internal messaging only; nothing leaves the device.
+const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
+let offscreenCreating = null;
 
-async function relayImageScan(message, waitForPanel) {
-  const dataUrl = String(message.dataUrl || '');
-  if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) return { success: false, error: 'bad_image' };
-  const payload = {
-    type: 'PS_PANEL_SCAN_IMAGE',
-    dataUrl,
-    mimeType: String(message.mimeType || ''),
-    fileName: String(message.fileName || 'image')
-  };
-  // Right after sidePanel.open() the panel needs a moment to load and register its listener.
-  const deadline = Date.now() + (waitForPanel ? 15000 : 0);
-  for (;;) {
+async function ensureOffscreen() {
+  if (!chrome.offscreen) throw new Error('offscreen_unavailable');
+  const url = chrome.runtime.getURL(OFFSCREEN_URL);
+  if (chrome.runtime.getContexts) {
+    const ctx = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [url] });
+    if (ctx.length) return;
+  }
+  if (!offscreenCreating) {
+    offscreenCreating = chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ['WORKERS'],
+      justification: 'On-device OCR (Tesseract.js web worker) and PDF scanning of files before they are uploaded.'
+    }).catch((e) => {
+      if (!/single offscreen|already/i.test((e && e.message) || '')) throw e;   // created meanwhile
+    }).finally(() => { offscreenCreating = null; });
+  }
+  await offscreenCreating;
+}
+
+async function scanInOffscreen(payload) {
+  await ensureOffscreen();
+  // Right after createDocument the page may still be registering its listener: retry briefly.
+  for (let i = 0; ; i++) {
     try {
       const res = await chrome.runtime.sendMessage(payload);
       if (res && typeof res === 'object') return res;
-      throw new Error('no receiver');            // another extension page answered with nothing
+      throw new Error('no receiver');
     } catch (e) {
-      if (Date.now() >= deadline) return { success: false, error: 'panel_closed' };
-      await sleep(400);
+      if (i >= 20) return { success: false, error: 'scanner_unavailable' };
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
 }
@@ -126,31 +131,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((e) => { dlog('side panel open failed', e && e.message); sendResponse({ success: false, error: 'panel_open_failed' }); });
     return true;
   }
-  if (message && message.type === 'SCAN_IMAGE_FOR_PII') {
+  if (message && (message.type === 'SCAN_IMAGE_FOR_PII' || message.type === 'SCAN_PDF_FOR_PII')) {
     if (!sender.tab) { sendResponse({ success: false, error: 'no_tab' }); return false; }
-    relayImageScan(message, !!message.waitForPanel)
-      .then(sendResponse)
-      .catch(() => sendResponse({ success: false, error: 'scan_failed' }));
-    return true;
-  }
-  if (message && message.type === 'SCAN_PDF_FOR_PII') {
-    if (!sender.tab) { sendResponse({ success: false, error: 'no_tab' }); return false; }
+    const isPdf = message.type === 'SCAN_PDF_FOR_PII';
+    const dataUrl = String(message.dataUrl || '');
+    if (isPdf ? !/^data:[^,]*;base64,/i.test(dataUrl) : !/^data:image\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
+      sendResponse({ success: false, error: isPdf ? 'bad_pdf' : 'bad_image' });
+      return false;
+    }
     (async () => {
-      if (typeof psPdfScan === 'undefined') throw new Error('pdf_scanner_unavailable');
       const settings = await getSettings();
-      const r = await psPdfScan.scan(message.dataUrl, {
-        enabledTypes: settings.enabledTypes,
-        confidenceThreshold: settings.confidenceThreshold,
-        lang: settings.lang
+      const lang = message.lang === 'en' || message.lang === 'id' ? message.lang : settings.lang;   // the page's resolved UI language
+      const res = await scanInOffscreen({
+        type: isPdf ? 'PS_OFFSCREEN_SCAN_PDF' : 'PS_OFFSCREEN_SCAN_IMAGE',
+        dataUrl,
+        lang,
+        settings: { enabledTypes: settings.enabledTypes, confidenceThreshold: settings.confidenceThreshold, lang }
       });
-      dlog('pdf scan', { pages: r.pages, findings: r.findings.length, hasPII: r.hasPII });
-      return { success: true, ...r };
+      dlog(isPdf ? 'pdf scan' : 'image scan', res && { success: res.success, hasPII: res.hasPII, findings: (res.findings || []).length });
+      return res;
     })()
       .then(sendResponse)
-      .catch((e) => sendResponse({ success: false, error: (e && e.message) || 'pdf_scan_failed' }));
+      .catch((e) => sendResponse({ success: false, error: (e && e.message) || 'scan_failed' }));
     return true;
   }
-  if (message && message.type === 'PS_PANEL_SCAN_IMAGE') return false;   // meant for the side panel
+  if (message && /^PS_OFFSCREEN_/.test(message.type || '')) return false;   // meant for the offscreen page
   (async () => {
     try {
       const settings = await getSettings();
