@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptShield</title>
+  <meta name="description" content="PromptShield mendeteksi NIK, NPWP, nomor rekening, dan data sensitif lainnya sebelum kamu kirim ke AI. Cek teks, foto, atau PDF langsung di browser.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,700;1,9..144,900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:          #f7f4ef;
+      --bg-card:     #ffffff;
+      --bg-nav:      rgba(247, 244, 239, 0.85);
+      --accent:      #1a3fcc;
+      --accent-soft: #e8ecfb;
+      --ok:          #16a34a;
+      --warn:        #ea580c;
+      --danger:      #dc2626;
+      --fg:          #0f0f0f;
+      --fg-2:        #3d3d3d;
+      --fg-3:        #888888;
+      --border:      rgba(0, 0, 0, 0.08);
+      --shadow-sm:   0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+      --shadow-md:   0 4px 16px rgba(0,0,0,.08), 0 1px 4px rgba(0,0,0,.05);
+      --shadow-lg:   0 12px 40px rgba(0,0,0,.10), 0 2px 8px rgba(0,0,0,.06);
+      --radius:      16px;
+      --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: var(--sans); font-size: 16px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased; overflow-x: hidden;
+    }
+    [hidden] { display: none !important; }
+    a { color: inherit; }
+    button { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+    .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+    @media (min-width: 640px) { .wrap { padding: 0 24px; } }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+    /* ── Buttons ────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border-radius: 100px; padding: 10px 20px; min-height: 44px;
+      font: 500 15px/1 var(--sans); text-decoration: none; cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: background 160ms ease, border-color 160ms ease;
+    }
+    .btn-dark { background: #0f0f0f; color: #fff; }
+    .btn-dark:hover { background: #2a2a2a; }
+    .btn-dark:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-line { background: transparent; color: var(--fg); border-color: rgba(0, 0, 0, 0.14); }
+    .btn-line:hover { background: var(--bg-card); border-color: rgba(0, 0, 0, 0.22); }
+    .btn-sm { min-height: 38px; padding: 8px 18px; font-size: 14px; }
+
+    /* ── Navbar ─────────────────────────────────────────── */
+    .nav {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--bg-nav);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 9px; font: 600 16px/1 var(--sans); text-decoration: none; letter-spacing: -0.01em; }
+    .brand svg { width: 26px; height: 26px; color: var(--accent); flex: none; }
+    .nav-right { display: flex; align-items: center; gap: 14px; }
+    .lang {
+      display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 4px;
+      font: 500 13px/1 var(--sans); color: var(--fg-3); cursor: pointer;
+    }
+    .lang .on { color: var(--fg); }
+    .lang .sep { color: rgba(0, 0, 0, 0.18); }
+    .lang:hover span:not(.on):not(.sep) { color: var(--fg-2); }
+    @media (max-width: 420px) { .nav .btn { display: none; } }
+
+    /* ── Hero ───────────────────────────────────────────── */
+    .hero { padding: 72px 0 88px; }
+    @media (min-width: 768px) { .hero { padding: 100px 0 112px; } }
+    .hero-inner { position: relative; overflow: visible; max-width: 680px; margin: 0 auto; text-align: center; }
+    .pill {
+      display: inline-block; margin: 0 0 24px;
+      background: var(--accent-soft); color: var(--accent);
+      font: 500 12px/1.4 var(--sans); border-radius: 100px; padding: 5px 14px;
+    }
+    h1 {
+      font-family: var(--serif); font-weight: 900; font-size: clamp(2.8rem, 6vw, 4.2rem);
+      line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 22px; color: var(--fg);
+      font-optical-sizing: auto; text-wrap: balance;
+    }
+    h1 em { font-style: italic; font-weight: 700; color: var(--accent); }
+    .hero-sub { font: 400 17px/1.65 var(--sans); color: var(--fg-2); max-width: 520px; margin: 0 auto 34px; text-wrap: pretty; }
+    .ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .ctas .btn { min-height: 48px; padding: 12px 24px; }
+    @media (max-width: 479px) { .ctas { flex-direction: column; } .ctas .btn { width: 100%; } }
+    .trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 24px; margin: 32px 0 0; padding: 0; list-style: none; font: 500 13px/1.4 var(--sans); color: var(--fg-3); }
+    .trust li { display: inline-flex; align-items: center; gap: 7px; }
+    .trust svg { width: 15px; height: 15px; flex: none; }
+
+    /* Floating cards: decorative previews of what the extension shows. */
+    .float {
+      position: absolute; z-index: 1;
+      background: var(--bg-card); border-radius: 14px; box-shadow: var(--shadow-lg);
+      padding: 14px 16px; text-align: left; pointer-events: none;
+      animation: bob 6s ease-in-out infinite;
+    }
+    .float-left { width: 210px; left: -250px; top: 120px; --tilt: -6deg; transform: rotate(var(--tilt)); }
+    .float-right { width: 190px; right: -240px; top: 250px; --tilt: 4deg; transform: rotate(var(--tilt)); animation-delay: -3s; }
+    @keyframes bob { 0%, 100% { transform: rotate(var(--tilt)) translateY(0); } 50% { transform: rotate(var(--tilt)) translateY(-6px); } }
+    .float-label { display: block; font: 500 11px/1.3 var(--sans); color: var(--fg-3); margin-bottom: 8px; }
+    .float-chip { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 8px; padding: 6px 10px; font: 600 13px/1.2 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+    .float-note { display: block; font: 400 11px/1.3 var(--sans); color: var(--fg-3); margin-top: 8px; }
+    .float-head { display: flex; align-items: center; gap: 7px; font: 500 12px/1.3 var(--sans); color: var(--fg); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15); }
+    .float-sub { display: block; font: 400 11px/1.3 var(--sans); color: var(--fg-3); margin: 4px 0 10px 15px; }
+    .float-ok { display: inline-block; background: #dcfce7; color: #15803d; border-radius: 100px; padding: 4px 10px; font: 500 11px/1.3 var(--sans); }
+    /* Cards sit in the side margins; below this width they would cover the headline. */
+    @media (max-width: 1099px) { .float { display: none; } }
+
+    /* ── Section shared ─────────────────────────────────── */
+    section { scroll-margin-top: 64px; }
+    h2 { font: 700 2rem/1.2 var(--serif); letter-spacing: -0.015em; margin: 0 0 10px; text-align: center; color: var(--fg); }
+    @media (min-width: 640px) { h2 { font-size: 2.25rem; } }
+    .section-sub { font: 400 15px/1.6 var(--sans); color: var(--fg-2); text-align: center; margin: 0 auto 18px; max-width: 52ch; }
+    .center { text-align: center; }
+
+    /* ── Scanner (white band) ───────────────────────────── */
+    .band-white { background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 80px 0; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;
+      border-radius: 100px; padding: 4px 11px 4px 9px; font: 500 12px/1.3 var(--sans);
+    }
+    .badge svg { width: 12px; height: 12px; flex: none; }
+    .tabs-row { display: flex; justify-content: center; margin: 32px 0 16px; }
+    .tabs { display: inline-flex; background: var(--bg); border-radius: 100px; padding: 4px; gap: 2px; max-width: 100%; }
+    .tab {
+      background: transparent; border: 0; border-radius: 100px; padding: 8px 18px;
+      font: 500 13px/1.3 var(--sans); color: var(--fg-3); cursor: pointer; white-space: nowrap;
+      transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+    }
+    .tab:hover { color: var(--fg-2); }
+    .tab[aria-selected="true"] { background: var(--bg-card); color: var(--fg); box-shadow: var(--shadow-sm); }
+    @media (max-width: 479px) { .tabs { display: flex; width: 100%; } .tab { flex: 1; padding: 8px 6px; } }
+
+    .scanner {
+      max-width: 720px; margin: 0 auto;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-md); padding: 20px;
+    }
+    @media (min-width: 640px) { .scanner { padding: 24px; } }
+
+    textarea {
+      width: 100%; min-height: 140px; resize: vertical; display: block;
+      font: 400 15px/1.55 var(--sans); color: var(--fg);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    }
+    textarea::placeholder { color: var(--fg-3); }
+    textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--bg-card); }
+    .panel-actions { display: flex; align-items: center; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+    .link-btn { background: none; border: 0; padding: 4px 2px; color: var(--accent); font: 500 14px/1 var(--sans); cursor: pointer; }
+    .link-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+    .drop {
+      display: block; width: 100%; text-align: center; cursor: pointer;
+      border: 1.5px dashed rgba(0, 0, 0, 0.15); border-radius: 12px; background: var(--bg);
+      padding: 40px 20px 34px; transition: border-color 180ms ease, background 180ms ease;
+    }
+    .drop:hover, .drop.drag { border-color: var(--accent); background: var(--accent-soft); }
+    .drop-icon {
+      width: 48px; height: 48px; border-radius: 14px; margin: 0 auto 14px;
+      background: var(--bg-card); color: var(--accent); box-shadow: var(--shadow-sm);
+      display: grid; place-items: center;
+    }
+    .drop-icon svg { width: 22px; height: 22px; }
+    .drop-label { display: block; font: 600 15px/1.4 var(--sans); color: var(--fg); }
+    .drop-sub { display: block; font: 400 13px/1.4 var(--sans); color: var(--fg-3); margin-top: 4px; }
+    .preview { display: block; max-height: 220px; max-width: 100%; margin: 16px auto 0; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); object-fit: contain; }
+    .file-name { margin: 14px 0 0; color: var(--fg-2); font-size: 14px; text-align: center; word-break: break-all; }
+    .status { display: flex; align-items: center; gap: 10px; margin: 16px 0 0; color: var(--accent); font: 500 14px/1.4 var(--sans); }
+    .status::before {
+      content: ''; width: 16px; height: 16px; border-radius: 50%; flex: none;
+      border: 2px solid currentColor; border-top-color: transparent; animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Result card */
+    .result { margin-top: 18px; border-radius: 12px; padding: 16px 18px; animation: rise 220ms ease both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .result.ok { background: #f0fdf4; border: 1px solid #bbf7d0; }
+    .result.warn { background: var(--bg-card); border: 1px solid #fed7aa; box-shadow: 0 0 0 4px #fff7ed; }
+    .result.err { background: #fef2f2; border: 1px solid #fecaca; }
+    .result-head { display: flex; align-items: flex-start; gap: 10px; }
+    .result-icon { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+    .result.ok .result-icon { color: var(--ok); }
+    .result.warn .result-icon { color: var(--warn); }
+    .result.err .result-icon { color: var(--danger); }
+    .result-title { margin: 0; font: 600 16px/1.4 var(--sans); color: var(--fg); }
+    .result-body { margin: 4px 0 0; font: 400 14px/1.55 var(--sans); color: var(--fg-2); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+      background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
+      border-radius: 8px; padding: 6px 12px; font: 600 12px/1.3 var(--sans);
+    }
+    .chip-type { white-space: nowrap; }
+    .chip-val { font: 500 12px/1.3 var(--mono); color: #c2410c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .result-foot { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+
+    /* ── PWA install button ───────────────────────────────── */
+    #pwa-install {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+      background: var(--accent); color: #fff; border: 0; border-radius: 100px;
+      padding: 12px 24px; min-height: 44px; font: 600 14px/1.2 var(--sans);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2); cursor: pointer; white-space: nowrap;
+    }
+    #pwa-install[hidden] { display: none; }
+    #pwa-install:hover { background: #1533a8; }
+
+    /* ── Photo redaction (safe version download) ─────────── */
+    .redact-slot:empty { display: none; }
+    .redact-slot { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+    .redact-title { margin: 0; font: 600 14px/1.4 var(--sans); color: var(--fg); }
+    .redact-note { margin: 0; font: 400 13px/1.55 var(--sans); color: var(--fg-2); }
+    .redact-safe { margin: 8px 0 0; font: 600 14px/1.4 var(--sans); color: var(--ok); }
+    #redactedPreview { display: block; max-width: 100%; height: auto; margin: 12px 0; border-radius: 8px; border: 1px solid var(--border); }
+    #downloadRedacted {
+      width: 100%; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 8px;
+      background: var(--accent); color: #fff; font: 600 15px/1.2 var(--sans); cursor: pointer;
+      transition: background 150ms ease;
+    }
+    #downloadRedacted:hover { background: #1533a8; }
+
+    /* ── How it works ───────────────────────────────────── */
+    .band-cream { padding: 88px 0; }
+    .steps { display: grid; gap: 16px; margin: 36px 0 0; padding: 0; list-style: none; }
+    @media (min-width: 768px) { .steps { grid-template-columns: repeat(3, 1fr); gap: 20px; } }
+    .step { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 26px 24px 28px; }
+    /* --accent-soft on white is too faint to read, so the numerals use a slightly deeper tint of the same blue. */
+    .step-num { display: block; font: 900 3rem/1 var(--serif); color: #c9d3f6; margin-bottom: 18px; letter-spacing: -0.02em; }
+    .step h3 { margin: 0 0 8px; font: 700 1.1rem/1.3 var(--serif); color: var(--fg); }
+    .step p { margin: 0; font: 400 14px/1.6 var(--sans); color: var(--fg-2); }
+
+    .install { max-width: 720px; margin: 44px auto 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 24px; scroll-margin-top: 84px; }
+    .install h3 { margin: 0 0 4px; font: 700 1.2rem/1.3 var(--serif); }
+    .install p { margin: 0 0 12px; color: var(--fg-2); font-size: 14px; }
+    .install ol { margin: 0; padding-left: 20px; color: var(--fg-2); font-size: 15px; }
+    .install li { margin: 5px 0; }
+    .install code { font: 500 13px var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; color: var(--fg); }
+
+    footer { background: #0f0f0f; color: #888; padding: 32px 24px; text-align: center; font: 400 13px/1.5 var(--sans); }
+  </style>
+  <link rel="manifest" href="manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="PromptShield">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <meta name="theme-color" content="#1a3fcc">
+</head>
+<body>
+  <a class="sr-only" href="#scanner" data-i18n="skip"></a>
+
+  <!-- Navbar -->
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="PromptShield">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2.5l7.5 2.8v6.2c0 4.9-3.2 8.3-7.5 10-4.3-1.7-7.5-5.1-7.5-10V5.3L12 2.5z"/>
+          <path d="M8.6 11.8l2.4 2.4 4.4-4.6"/>
+        </svg>
+        <span data-i18n="nav_product">PromptShield</span>
+      </a>
+      <div class="nav-right">
+        <button type="button" class="lang" id="lang-toggle" aria-label="Ganti bahasa / Switch language">
+          <span data-lang="id">ID</span><span class="sep" aria-hidden="true">|</span><span data-lang="en">EN</span>
+        </button>
+        <a class="btn btn-dark btn-sm js-install" href="#install" data-i18n="nav_cta">Pasang di Chrome</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- Hero -->
+    <div class="hero">
+      <div class="wrap">
+        <div class="hero-inner">
+          <p class="pill" data-i18n="hero_tag">Privasi · AI · Indonesia</p>
+          <h1 data-i18n-html="hero_title">Jaga datamu.<br><em>Sebelum masuk ke AI.</em></h1>
+          <p class="hero-sub" data-i18n="hero_sub"></p>
+          <div class="ctas">
+            <a class="btn btn-dark js-install" href="#install" data-i18n="hero_cta1">Pasang di Chrome →</a>
+            <a class="btn btn-line" href="#scanner" data-i18n="hero_cta2">Coba Scanner</a>
+          </div>
+          <ul class="trust">
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg><span data-i18n="trust_local">100% Lokal</span></li>
+            <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5L3.5 9H8l-1 5.5L12.5 7H8l1-5.5z"/></svg><span data-i18n="trust_realtime">Real-time</span></li>
+            <li><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3.5" width="13" height="9" rx="1.5" fill="#fff"/><path d="M1.5 5a1.5 1.5 0 011.5-1.5h10A1.5 1.5 0 0114.5 5v3h-13z" fill="#dc2626"/><rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1.25" fill="none" stroke="rgba(0,0,0,.15)" stroke-width=".5"/></svg><span data-i18n="trust_id">Khusus Indonesia</span></li>
+          </ul>
+
+          <!-- Decorative previews (hidden from screen readers) -->
+          <div class="float float-left" aria-hidden="true">
+            <span class="float-label" data-i18n="card_nik_label">NIK terdeteksi</span>
+            <span class="float-chip">3171 •••••••• 0002</span>
+            <span class="float-note" data-i18n="card_nik_note">Disembunyikan otomatis</span>
+          </div>
+          <div class="float float-right" aria-hidden="true">
+            <span class="float-head"><span class="dot"></span><span data-i18n="card_ok_title">Teks aman</span></span>
+            <span class="float-sub" data-i18n="card_ok_sub">Tidak ada data sensitif</span>
+            <span class="float-ok" data-i18n="card_ok_badge">✓ Siap dikirim ke AI</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scanner -->
+    <section id="scanner" class="band-white" aria-labelledby="scanner-title">
+      <div class="wrap">
+        <h2 id="scanner-title" data-i18n="scanner_title">Cek dokumenmu sekarang</h2>
+        <p class="section-sub" data-i18n="scanner_sub"></p>
+        <p class="center">
+          <span class="badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span data-i18n="ondevice"></span>
+          </span>
+        </p>
+
+        <div class="tabs-row">
+          <div class="tabs" role="tablist" aria-labelledby="scanner-title">
+            <button type="button" class="tab" role="tab" id="tab-text" aria-controls="panel-text" aria-selected="true" data-tab="text" data-i18n="tab_text">Tempel Teks</button>
+            <button type="button" class="tab" role="tab" id="tab-image" aria-controls="panel-image" aria-selected="false" tabindex="-1" data-tab="image" data-i18n="tab_image">Foto/Gambar</button>
+            <button type="button" class="tab" role="tab" id="tab-pdf" aria-controls="panel-pdf" aria-selected="false" tabindex="-1" data-tab="pdf" data-i18n="tab_pdf">PDF</button>
+          </div>
+        </div>
+
+        <div class="scanner">
+          <!-- Text -->
+          <div class="panel" role="tabpanel" id="panel-text" aria-labelledby="tab-text">
+            <label for="text-input" class="sr-only" data-i18n="tab_text">Tempel Teks</label>
+            <textarea id="text-input" rows="5" spellcheck="false" data-i18n-placeholder="text_placeholder"></textarea>
+            <div class="panel-actions">
+              <button type="button" class="btn btn-dark" id="text-scan" data-i18n="text_cta">Scan Teks</button>
+              <button type="button" class="link-btn" id="text-sample" data-i18n="text_sample">Pakai contoh</button>
+            </div>
+          </div>
+
+          <!-- Image -->
+          <div class="panel" role="tabpanel" id="panel-image" aria-labelledby="tab-image" hidden>
+            <label class="drop" id="drop-image" tabindex="0">
+              <input type="file" id="file-image" accept="image/*" class="sr-only" tabindex="-1">
+              <span class="drop-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13V4m0 0L7 7m3-3l3 3"/><path d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1"/></svg>
+              </span>
+              <span class="drop-label" data-i18n="drop_label"></span>
+              <span class="drop-sub" data-i18n="drop_sub"></span>
+            </label>
+            <img id="image-preview" class="preview" alt="" hidden>
+            <p class="status" id="image-status" role="status" hidden></p>
+          </div>
+
+          <!-- PDF -->
+          <div class="panel" role="tabpanel" id="panel-pdf" aria-labelledby="tab-pdf" hidden>
+            <label class="drop" id="drop-pdf" tabindex="0">
+              <input type="file" id="file-pdf" accept="application/pdf,.pdf" class="sr-only" tabindex="-1">
+              <span class="drop-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5H6a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V6.5l-4-4z"/><path d="M12 2.5v4h4M7.5 11h5M7.5 14h3"/></svg>
+              </span>
+              <span class="drop-label" data-i18n="pdf_label"></span>
+              <span class="drop-sub" data-i18n="pdf_sub"></span>
+            </label>
+            <p class="file-name" id="pdf-name" hidden></p>
+            <p class="status" id="pdf-status" role="status" hidden></p>
+          </div>
+
+          <div id="result" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="band-cream" aria-labelledby="how-title">
+      <div class="wrap">
+        <h2 id="how-title" data-i18n="how_title">Cara kerja</h2>
+        <ol class="steps">
+          <li class="step"><span class="step-num" aria-hidden="true">01</span><h3 data-i18n="how_1_title"></h3><p data-i18n="how_1_body"></p></li>
+          <li class="step"><span class="step-num" aria-hidden="true">02</span><h3 data-i18n="how_2_title"></h3><p data-i18n="how_2_body"></p></li>
+          <li class="step"><span class="step-num" aria-hidden="true">03</span><h3 data-i18n="how_3_title"></h3><p data-i18n="how_3_body"></p></li>
+        </ol>
+
+        <div class="install" id="install">
+          <h3 data-i18n="install_title"></h3>
+          <p data-i18n="install_sub"></p>
+          <ol>
+            <li data-i18n-html="install_1"></li>
+            <li data-i18n-html="install_2"></li>
+            <li data-i18n-html="install_3"></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <button type="button" id="pwa-install" hidden><span aria-hidden="true">📲</span> <span data-i18n="pwa_install">Pasang di HP</span></button>
+
+  <footer data-i18n="footer_copy">© 2025 PromptShield · Team Open Minded · Techtonic 3.0</footer>
+
+  <script src="js/constants.js"></script>
+  <script src="js/detectors.js"></script>
+  <script src="js/doc-scan.js"></script>
+  <script src="js/scanner.js"></script>
+  <script>
+    // PWA: offline support. Service workers need https:// or localhost (not file://).
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(() => console.log('[PromptShield] PWA ready'))
+          .catch((err) => console.warn('[PromptShield] SW failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>

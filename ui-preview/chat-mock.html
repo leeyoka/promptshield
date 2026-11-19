@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptShield harness (mock chat, not ChatGPT)</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fff; --fg:#111; --muted:#666; --line:#e5e5e5; --bubble:#f3f3f3; }
+    @media (prefers-color-scheme: dark) { :root:not(.light) { --bg:#212121; --fg:#ececec; --muted:#9a9a9a; --line:#3a3a3a; --bubble:#2f2f2f; } }
+    html.dark { --bg:#212121; --fg:#ececec; --muted:#9a9a9a; --line:#3a3a3a; --bubble:#2f2f2f; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    .bar { padding:8px 16px; border-bottom:1px solid var(--line); font-size:12px; color:var(--muted); display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .bar a { color:inherit; }
+    main { max-width:760px; margin:0 auto; padding:16px 16px 220px; }
+    .msg { margin:12px 0; line-height:1.55; white-space:pre-wrap; }
+    .msg.user { background:var(--bubble); border-radius:16px; padding:10px 14px; margin-left:20%; }
+    .msg.assistant { padding:0 4px; }
+    form { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; width:min(760px, calc(100% - 32px)); background:var(--bubble); border-radius:24px; padding:12px 56px 12px 16px; box-sizing:border-box; }
+    #prompt-textarea { min-height:24px; max-height:200px; overflow:auto; outline:none; white-space:pre-wrap; }
+    #prompt-textarea:empty::before { content:'Tanyakan apa saja'; color:var(--muted); }
+    #composer-submit-button { position:absolute; right:10px; bottom:10px; width:36px; height:36px; border-radius:50%; border:0; background:var(--fg); color:var(--bg); cursor:pointer; }
+    #composer-submit-button:disabled { opacity:.3; cursor:default; }
+    #wire { max-width:760px; margin:0 auto 12px; padding:0 16px; font-size:12px; }
+    .writing { border:1px solid var(--line); border-radius:12px; padding:10px; margin-top:8px; }
+    #wire pre { white-space:pre-wrap; background:var(--bubble); padding:8px; border-radius:8px; }
+    .ok { color:#067647; } .bad { color:#b42318; font-weight:600; }
+  </style>
+  <!-- Like the extension's document_start stage: shared code + early guard load before the site's scripts. -->
+  <script src="../promptshield/src/shared/constants.js"></script>
+  <script src="../promptshield/src/shared/i18n.js"></script>
+  <script src="../promptshield/src/shared/ui-tokens.js"></script>
+  <script src="../promptshield/src/shared/detectors.js"></script>
+  <script src="../promptshield/src/shared/complexity.js"></script>
+  <script src="../promptshield/src/shared/restorer.js"></script>
+  <script src="../promptshield/src/shared/masker.js"></script>
+  <script src="../promptshield/src/content/early-guard.js"></script>
+</head>
+<body>
+  <div class="bar">
+    <strong>Harness</strong> mock chat page that loads the real PromptShield content script. Not ChatGPT. AI replies are simulated.
+    <span>Mode: <a href="?">normal</a> · <a href="?mode=nopaste">ignores paste</a> · <a href="?mode=broken">rejects all writes</a> · Site: <a href="?site=eager">eager capture</a> · <a href="?site=pointer">sends on pointerdown</a> · <a href="?writing=1">reply Writing blocks</a></span>
+    <label><input type="checkbox" id="dark"> dark</label>
+  </div>
+  <main id="chat"></main>
+  <div id="wire" data-ps-norestore></div>
+  <form id="composer-form" onsubmit="return false">
+    <div id="prompt-textarea" contenteditable="true" role="textbox" aria-label="Message"></div>
+    <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt" type="button" disabled>↑</button>
+  </form>
+
+  <script>
+    // ---- Stub of the chrome.* APIs (in-memory service worker) ----
+    (function () {
+      const counters = {}, byKey = new Map(), map = {};
+      const stats = { items: {}, adviceShown: 0, accepted: 0 };
+      window.__psHarness = { map, stats, lastSent: null, wire: [] };
+      window.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage(msg, cb) {
+            setTimeout(() => {
+              let res = { success: true };
+              if (msg.action === 'PS_MASK') {
+                res.tokens = msg.items.map((i) => {
+                  const k = i.type + '\u0000' + (window.psMasker ? psMasker.canonical(i.type, i.value) : i.value);
+                  if (!byKey.has(k)) { counters[i.type] = (counters[i.type] || 0) + 1; const t = `[${i.type}_${counters[i.type]}]`; byKey.set(k, t); map[t] = i.value; }
+                  return byKey.get(k);
+                });
+              } else if (msg.action === 'PS_GET_MAP') { res.map = { ...map }; }
+              else if (msg.action === 'PS_RECORD') {
+                const u = msg.update || {};
+                for (const [t, n] of Object.entries(u.items || {})) stats.items[t] = (stats.items[t] || 0) + n;
+                if (u.adviceShown) stats.adviceShown++;
+                if (u.adviceAccepted) stats.accepted++;
+              } else if (msg.action === 'PS_SET_LAST_SENT') { window.__psHarness.lastSent = msg.text; }
+              cb && cb(res);
+            }, 5);
+          }
+        },
+        storage: { local: { get(k, cb) { cb({}); }, set() {} }, onChanged: { addListener() {} } }
+      };
+    })();
+
+    // ---- Mock chat site ----
+    const mode = new URLSearchParams(location.search).get('mode') || 'normal';
+    const ed = document.getElementById('prompt-textarea');
+    const btn = document.getElementById('composer-submit-button');
+    const chat = document.getElementById('chat');
+    const SAMPLE_VALUES = ['3171016408980002', '081298765432', 'rina.sari98@example.com', '4111-2222-3333-4448', 'Rina Sari', '0123-01-012345-50-1', '3273055102990004', '3273 0551 0299 0004', 'Dimas Prasetyo'];
+    const site = new URLSearchParams(location.search).get('site') || 'normal';
+
+    const sync = () => { btn.disabled = ed.innerText.trim() === ''; };
+    // "broken" mode: the editor only accepts real typing; programmatic edits are reverted.
+    let draft = '', typing = false;
+    ed.addEventListener('keydown', () => { typing = true; setTimeout(() => { typing = false; }, 0); }, true);
+    ed.addEventListener('input', () => {
+      if (mode === 'broken') { if (typing) draft = ed.innerText; else ed.innerText = draft; }
+      sync();
+    });
+    ed.addEventListener('paste', (e) => {
+      e.preventDefault();
+      if (mode !== 'normal') return; // simulate an editor that ignores synthetic paste
+      const t = e.clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, t);
+    });
+    window.__psHarness.setDraft = (t) => { ed.innerText = t; draft = t; sync(); ed.focus(); };
+    if (site === 'eager') {
+      // Site handles send in its OWN window capture listeners (registered before our main script).
+      window.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && ed.contains(e.target)) { e.preventDefault(); send(); } }, true);
+      window.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#composer-submit-button')) send(); }, true);
+    } else if (site === 'pointer') {
+      // Site sends on pointerdown for real clicks (programmatic clicks still use click).
+      ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+      btn.addEventListener('pointerdown', send);
+      btn.addEventListener('click', (e) => { if (!e.isTrusted) send(); });
+    } else {
+      ed.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+      btn.addEventListener('click', send);
+    }
+    document.getElementById('dark').addEventListener('change', (e) => {
+      document.documentElement.classList.toggle('dark', e.target.checked);
+      document.documentElement.classList.toggle('light', !e.target.checked);
+    });
+
+    function send() {
+      const text = ed.innerText.replace(/\n$/, '');
+      if (!text.trim()) return;
+      const leaked = SAMPLE_VALUES.filter((v) => text.includes(v));
+      window.__psHarness.wire.push(text);
+      document.getElementById('wire').innerHTML = `<div>Payload that would leave the browser (simulated): ${leaked.length ? `<span class="bad">RAW VALUES: ${leaked.length}</span>` : '<span class="ok">no raw sample values</span>'}</div><pre></pre>`;
+      document.querySelector('#wire pre').textContent = text;
+      const u = document.createElement('div'); u.className = 'msg user'; if (!new URLSearchParams(location.search).has('nomarker')) u.dataset.messageAuthorRole = 'user'; u.textContent = text; chat.appendChild(u);
+      ed.innerHTML = ''; sync();
+      const tokens = [...new Set(text.match(/\[[A-Z]+(?:_[A-Z]+)*_\d+\]/g) || [])];
+      const reply = tokens.length
+        ? `(Simulasi balasan AI) Baik, saya sudah mencatat data berikut: ${tokens.join(', ')}. Format Markdown: ${tokens[0].replace(/_/g, '\\_').replace('[', '\\[').replace(']', '\\]')}. Tanpa kurung: ${tokens[0].slice(1, -1)}.`
+        : '(Simulasi balasan AI) Tidak ada placeholder di pesanmu.';
+      const a = document.createElement('div'); a.className = 'msg assistant'; if (!new URLSearchParams(location.search).has('nomarker')) a.dataset.messageAuthorRole = 'assistant'; chat.appendChild(a);
+      if (new URLSearchParams(location.search).has('writing') && tokens.length) {
+        // Like ChatGPT "Writing" blocks: an editable editor INSIDE the reply, here even with the composer's id.
+        const w = document.createElement('div');
+        w.id = 'prompt-textarea'; w.className = 'ProseMirror writing'; w.contentEditable = 'true';
+        w.textContent = `Draft email: Nama ${tokens[0]} mohon diproses.`;
+        a.appendChild(w);
+      }
+      const node = document.createTextNode(''); a.appendChild(node);
+      let i = 0;
+      const timer = setInterval(() => {
+        const n = 1 + Math.floor(Math.random() * 6);
+        node.data += reply.slice(i, i + n); i += n;
+        if (i >= reply.length) clearInterval(timer);
+      }, 30);
+    }
+  </script>
+  <script src="../promptshield/src/content/content-script.js"></script>
+</body>
+</html>

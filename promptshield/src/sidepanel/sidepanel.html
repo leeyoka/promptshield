@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptShield</title>
+  <link rel="stylesheet" href="sidepanel.css">
+  <script src="../../lib/tesseract.min.js"></script>
+</head>
+<body>
+  <header class="top">
+    <span class="brand-icon" id="brand-icon"></span>
+    <div>
+      <h1>PromptShield <span class="ver tnum" id="version"></span></h1>
+      <p class="sub" data-i18n="sub"></p>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. Mask before sharing -->
+    <section aria-labelledby="h-input">
+      <div class="step-head">
+        <span class="step-num">1</span>
+        <h2 id="h-input" data-i18n="inputTitle"></h2>
+      </div>
+      <textarea id="input" rows="7" spellcheck="false"></textarea>
+      <div class="row-meta">
+        <span class="muted small tnum" id="char-count"></span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-text" id="btn-sample" data-i18n="sample"></button>
+        <button type="button" class="btn-text" id="btn-clear" data-i18n="clear"></button>
+      </div>
+
+      <div id="detect" hidden>
+        <div class="list-head"><span data-i18n="detected"></span> <span class="tnum" id="det-count">0</span></div>
+        <ul class="list" id="list"></ul>
+      </div>
+      <p class="empty muted" id="empty" hidden data-i18n="noneFound"></p>
+
+      <div id="preview-wrap" hidden>
+        <div class="seg" role="tablist">
+          <button type="button" role="tab" data-view="original" aria-selected="false" data-i18n="viewOriginal"></button>
+          <button type="button" role="tab" data-view="safe" aria-selected="true" data-i18n="viewSafe"></button>
+        </div>
+        <div class="preview" id="preview" tabindex="0" aria-live="polite"></div>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="btn-copy" disabled data-i18n="copySafe"></button>
+      <p class="status small" id="copy-status" aria-live="polite"></p>
+
+      <div class="advice" id="advice" hidden></div>
+    </section>
+
+    <!-- 2. Restore the AI's reply -->
+    <section aria-labelledby="h-reply">
+      <div class="step-head">
+        <span class="step-num">2</span>
+        <h2 id="h-reply" data-i18n="replyTitle"></h2>
+      </div>
+      <p class="hint muted small" data-i18n="replyHint"></p>
+      <textarea id="reply" rows="5" spellcheck="false"></textarea>
+      <div id="restored-wrap" hidden>
+        <div class="list-head"><span data-i18n="restoredTitle"></span> <span class="tnum" id="restored-count"></span></div>
+        <pre class="preview" id="restored"></pre>
+        <button type="button" class="btn btn-secondary btn-block" id="btn-copy-restored" data-i18n="copyRestored"></button>
+        <p class="status small" id="restore-status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- 3. Image / document scanner -->
+    <section id="scan-section" aria-labelledby="h-scan">
+      <div class="step-head">
+        <span class="step-num">3</span>
+        <h2 id="h-scan" data-i18n="scanTitle"></h2>
+      </div>
+      <p class="hint muted small" data-i18n="scanHint"></p>
+      <p class="ondevice-badge">
+        <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span data-i18n="onDevice"></span>
+      </p>
+
+      <!-- Drop zone -->
+      <div id="ps-image-drop" role="button" tabindex="0" aria-label="Upload or drop image"
+           class="img-drop" data-i18n-aria="scanDropAria">
+        <div class="img-drop-inner">
+          <span class="img-drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13V4m0 0L7 7m3-3l3 3"/>
+              <path d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1"/>
+            </svg>
+          </span>
+          <span class="img-drop-label" data-i18n="scanDrop"></span>
+          <span class="img-drop-sub muted small" data-i18n="scanDropSub"></span>
+        </div>
+        <input type="file" id="ps-img-input" accept="image/*" tabindex="-1"
+               aria-hidden="true" style="display:none">
+      </div>
+
+      <!-- Preview -->
+      <img id="ps-img-preview" class="img-preview" src="" alt="" hidden>
+
+      <!-- Result card -->
+      <div id="ps-img-result" hidden></div>
+
+      <!-- Scanning spinner -->
+      <p id="ps-img-scanning" class="muted small" hidden data-i18n="scanScanning"></p>
+    </section>
+
+    <!-- 4. Energy -->
+    <section id="energy-section" aria-labelledby="h-energy">
+      <div class="step-head">
+        <span class="step-num energy-icon" id="energy-icon" aria-hidden="true"></span>
+        <h2 id="h-energy" data-i18n="energyTitle"></h2>
+      </div>
+      <div class="energy-row">
+        <span><span data-i18n="energySaved"></span><span class="est" data-i18n="estimate"></span></span>
+        <span class="spacer"></span>
+        <strong class="energy-value tnum" id="energy-value">0 Wh</strong>
+      </div>
+      <div class="energy-row">
+        <span><span data-i18n="energyPotential"></span><span class="est" data-i18n="estimate"></span></span>
+        <span class="spacer"></span>
+        <span class="energy-potential tnum" id="energy-potential">0 Wh</span>
+      </div>
+      <p class="energy-sub muted small tnum" id="energy-potential-n"></p>
+      <p class="energy-note muted small" data-i18n="energyNote"></p>
+      <div class="edu-card" id="edu-card" hidden>
+        <p class="edu-label" data-i18n="eduLabel"></p>
+        <p class="edu-fact" id="edu-fact"></p>
+        <p class="edu-source" id="edu-source"></p>
+      </div>
+    </section>
+
+    <p class="foot" data-i18n="foot"></p>
+  </main>
+
+  <script src="../shared/constants.js"></script>
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/ui-tokens.js"></script>
+  <script src="../shared/detectors.js"></script>
+  <script src="../shared/complexity.js"></script>
+  <script src="../shared/restorer.js"></script>
+  <script src="../shared/masker.js"></script>
+  <script src="../shared/doc-scan.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

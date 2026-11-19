@@ -1,0 +1,82 @@
+{
+  "manifest_version": 3,
+  "name": "PromptShield",
+  "version": "1.2.2",
+  "description": "Masks personal data on your device before it reaches AI chats, restores it in replies, and suggests right-sized models.",
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "src/shared/constants.js",
+        "src/shared/i18n.js",
+        "src/shared/ui-tokens.js",
+        "src/shared/detectors.js",
+        "src/shared/complexity.js",
+        "src/shared/restorer.js",
+        "src/shared/masker.js",
+        "src/content/early-guard.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "src/content/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "commands": {
+    "open-side-panel": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Open the PromptShield side panel"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "lib/worker.min.js",
+        "lib/tesseract.min.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

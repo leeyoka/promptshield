@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptShield</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon"></span>
+      <div>
+        <h1>PromptShield</h1>
+        <p class="sub"><span data-i18n="sub"></span> <span class="tnum" id="version"></span></p>
+      </div>
+    </div>
+    <button type="button" class="btn btn-panel" id="btn-panel"><span id="panel-icon"></span><span><span data-i18n="openPanel"></span> <span class="kbd">Alt+Shift+P</span></span></button>
+    <p class="panel-msg small" id="panel-msg" aria-live="polite"></p>
+    <div class="seg" role="tablist">
+      <button type="button" role="tab" data-tab="overview" aria-selected="true" data-i18n="tabOverview"></button>
+      <button type="button" role="tab" data-tab="try" aria-selected="false" data-i18n="tabTry"></button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false" data-i18n="tabSettings"></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Overview -->
+    <section id="tab-overview" class="tab" role="tabpanel">
+      <div class="hero">
+        <div class="hero-num tnum" id="stat-protected">0</div>
+        <div class="hero-label" data-i18n="protected"></div>
+        <svg class="spark" id="spark" viewBox="0 0 140 32" role="img" aria-label=""></svg>
+        <div class="spark-label" data-i18n="last7"></div>
+      </div>
+
+      <ul class="group">
+        <li class="cell"><span data-i18n="rightSized"></span><span class="value tnum" id="stat-rightsized">0</span></li>
+        <li class="cell"><span><span data-i18n="energy"></span> <span class="est" data-i18n="estimate"></span></span><span class="value tnum" id="stat-energy">0 Wh</span></li>
+        <li class="cell"><span><span data-i18n="potential"></span> <span class="est" data-i18n="estimate"></span></span><span class="value tnum" id="stat-potential">0 Wh</span></li>
+      </ul>
+
+      <h2 class="group-title" data-i18n="byType"></h2>
+      <ul class="group" id="by-type"></ul>
+
+      <h2 class="group-title" data-i18n="lastSent"></h2>
+      <div class="group proof">
+        <pre class="mono" id="last-sent"></pre>
+        <p class="proof-line"><span id="proof-icon"></span><span data-i18n="proofLine"></span></p>
+      </div>
+
+      <p class="foot" data-i18n="privacyFoot"></p>
+    </section>
+
+    <!-- Try (sandbox, runs the same shared code as the extension) -->
+    <section id="tab-try" class="tab" role="tabpanel" hidden>
+      <label class="group-title" for="sim-input" data-i18n="tryLabel"></label>
+      <textarea id="sim-input" rows="6"></textarea>
+      <div class="row-btns">
+        <button type="button" class="btn btn-secondary" id="sim-sample" data-i18n="sample"></button>
+        <button type="button" class="btn btn-primary" id="sim-scan" data-i18n="scan"></button>
+      </div>
+      <div id="sim-results" hidden>
+        <h2 class="group-title"><span data-i18n="detected"></span> <span class="tnum" id="sim-count">0</span></h2>
+        <ul class="group" id="sim-list"></ul>
+        <h2 class="group-title" data-i18n="aiSees"></h2>
+        <pre class="group mono pad" id="sim-masked"></pre>
+        <h2 class="group-title" data-i18n="advice"></h2>
+        <div class="group pad" id="sim-advice"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tab" role="tabpanel" hidden>
+      <h2 class="group-title" data-i18n="typesTitle"></h2>
+      <ul class="group" id="type-toggles"></ul>
+
+      <h2 class="group-title" data-i18n="behaviour"></h2>
+      <ul class="group">
+        <li class="cell">
+          <label for="set-rightsize" data-i18n="rsToggle"></label>
+          <input type="checkbox" class="switch" role="switch" id="set-rightsize">
+        </li>
+        <li class="cell">
+          <label for="set-threshold"><span data-i18n="threshold"></span> <span class="tnum muted" id="threshold-val"></span></label>
+          <input type="range" id="set-threshold" min="0.5" max="0.95" step="0.05">
+        </li>
+        <li class="cell">
+          <label for="set-debug" data-i18n="debugToggle"></label>
+          <input type="checkbox" class="switch" role="switch" id="set-debug">
+        </li>
+        <li class="cell">
+          <label for="set-lang" data-i18n="language"></label>
+          <select id="set-lang">
+            <option value="auto">Auto</option>
+            <option value="id">Bahasa Indonesia</option>
+            <option value="en">English</option>
+          </select>
+        </li>
+      </ul>
+
+      <h2 class="group-title" data-i18n="vault"></h2>
+      <ul class="group">
+        <li class="cell"><span data-i18n="vaultCount"></span><span class="value tnum" id="vault-count">–</span></li>
+        <li class="cell">
+          <label for="set-ttl" data-i18n="ttl"></label>
+          <select id="set-ttl">
+            <option value="1">1 h</option>
+            <option value="24">24 h</option>
+            <option value="72">72 h</option>
+          </select>
+        </li>
+        <li class="cell"><button type="button" class="btn btn-quiet-danger" id="btn-clear" data-i18n="clearNow"></button><span class="muted small" id="clear-msg" aria-live="polite"></span></li>
+      </ul>
+      <p class="foot" data-i18n="vaultFoot"></p>
+    </section>
+  </main>
+
+  <script src="../shared/constants.js"></script>
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/ui-tokens.js"></script>
+  <script src="../shared/detectors.js"></script>
+  <script src="../shared/complexity.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
