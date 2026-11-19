@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.0 (19 Nov 2026)
+**Per-finding upload review, PDF screening, and WhatsApp Web.**
+- **Per-finding switches in the upload popup.** After a photo is scanned, every detected item is listed with its own
+  teal switch (ON = mask, OFF = allow; all ON by default) and a live preview. **Kirim versi aman** pixelates only the
+  word boxes (from Tesseract) of the items left ON, not the whole photo. Items whose position could not be found are
+  marked, and if one of them stays ON the whole photo is pixelated. With everything OFF the safe button is disabled
+  and a note explains why. **Batal** and **Kirim tanpa proteksi (berisiko)** are unchanged.
+- **PDF uploads are screened** (file picker, paste, drag & drop). The service worker extracts the text with the bundled
+  PDF.js (`lib/pdfjs/`, no network) and runs the shared detectors (`SCAN_PDF_FOR_PII`). A PDF with no confident
+  finding uploads silently. Otherwise the same per-finding popup appears; the safe version is the PDF text with each
+  item left ON replaced by `[TYPE_MASKED]`, uploaded as a `.txt` file in place of the PDF. Unreadable PDFs fail closed.
+- **WhatsApp Web** (`web.whatsapp.com`) gets the photo and PDF upload guard. File inputs are re-hooked after every
+  click and by a MutationObserver (WhatsApp re-creates them). If WhatsApp removed its input while the scan ran, the
+  chosen files are handed over by pasting them into the message box instead.
+- New shared helper `src/shared/image-redact.js` (box location incl. rotated OCR passes, region pixelation), tests in
+  `tests/upload-guard.test.js`.
+
 ## 1.2.2 (15 Nov 2026)
 **Fix (critical): after ChatGPT answered with an editable "Writing" block, PromptShield could read that block instead
 of the message box**, so a follow-up sent by clicking the send button went out unmasked, the shield scan said

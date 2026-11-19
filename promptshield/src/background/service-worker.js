@@ -7,6 +7,14 @@ importScripts('/src/shared/constants.js', '/src/shared/masker.js', '/src/backgro
 const DEBUG = false;
 function dlog(...a) { if (DEBUG) console.debug('[PromptShield SW]', ...a); }
 
+// PDF text extraction (SCAN_PDF_FOR_PII). MV3 only allows importScripts while the worker starts, so
+// PDF.js is loaded here. If it fails to load, PDF scans answer with an error and the page fails closed.
+try {
+  importScripts('/src/shared/detectors.js', '/lib/pdfjs/pdf.min.js', '/lib/pdfjs/pdf.worker.min.js', '/src/background/pdf-scan.js');
+} catch (e) {
+  dlog('PDF scanner unavailable:', e && e.message);
+}
+
 const EMPTY_STATS = () => ({
   totalItemsProtected: 0,
   byType: {},
@@ -123,6 +131,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     relayImageScan(message, !!message.waitForPanel)
       .then(sendResponse)
       .catch(() => sendResponse({ success: false, error: 'scan_failed' }));
+    return true;
+  }
+  if (message && message.type === 'SCAN_PDF_FOR_PII') {
+    if (!sender.tab) { sendResponse({ success: false, error: 'no_tab' }); return false; }
+    (async () => {
+      if (typeof psPdfScan === 'undefined') throw new Error('pdf_scanner_unavailable');
+      const settings = await getSettings();
+      const r = await psPdfScan.scan(message.dataUrl, {
+        enabledTypes: settings.enabledTypes,
+        confidenceThreshold: settings.confidenceThreshold,
+        lang: settings.lang
+      });
+      dlog('pdf scan', { pages: r.pages, findings: r.findings.length, hasPII: r.hasPII });
+      return { success: true, ...r };
+    })()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ success: false, error: (e && e.message) || 'pdf_scan_failed' }));
     return true;
   }
   if (message && message.type === 'PS_PANEL_SCAN_IMAGE') return false;   // meant for the side panel

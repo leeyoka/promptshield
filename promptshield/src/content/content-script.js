@@ -1,4 +1,4 @@
-// PromptShield content script for ChatGPT.
+// PromptShield content script for ChatGPT (plus Gemini and WhatsApp Web for the upload guard).
 // Flow: intercept send -> detect locally -> review sheet -> mask (tokens from the encrypted vault)
 //       -> write into composer -> read back and verify -> send. On ANY failure nothing is sent.
 // Plus: right-size advice banner, on-screen restore of real values in replies, proof of what was sent.
@@ -73,6 +73,11 @@
   } catch (_) { /* defaults */ }
 
   const typeLabel = (t) => (PS_TYPE_LABELS[t] || {})[lang] || t;
+
+  // Which supported site this is. The upload guard runs on all of them; the typed-prompt guard uses
+  // the adapter below, which only finds a composer where its selectors match (ChatGPT).
+  const SITE = /(^|\.)web\.whatsapp\.com$/.test(location.hostname) ? 'whatsapp'
+    : /(^|\.)gemini\.google\.com$/.test(location.hostname) ? 'gemini' : 'chatgpt';
 
   // ==========================================================================
   // ChatGPT adapter: the ONLY place that knows ChatGPT's DOM.
@@ -170,10 +175,21 @@
     messageArea() {
       return document.querySelector('main') || document.body;
     },
+    /** Where pasted files land: the message box (WhatsApp Web's sits in the chat footer). */
+    pasteTarget() {
+      const c = this.findComposer();
+      if (c) return c;
+      for (const sel of ['footer [contenteditable="true"]', '#main [contenteditable="true"][data-tab]', '[contenteditable="true"][role="textbox"]']) {
+        const el = [...document.querySelectorAll(sel)].find(isVisible);
+        if (el) return el;
+      }
+      return null;
+    },
     isDarkTheme() {
       const html = document.documentElement;
       if (html.classList.contains('dark')) return true;
       if (html.classList.contains('light')) return false;
+      if (document.body && document.body.classList.contains('dark')) return true;   // WhatsApp Web
       return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
   };
@@ -666,85 +682,118 @@
   }
 
   // ==========================================================================
-  // Image upload guard: OCR a photo (on-device, in the side panel) BEFORE the site receives it.
+  // Upload guard (photos + PDFs): scan a file on-device BEFORE the site receives it.
   // A capture-phase listener on window sees the file input's input/change events before the
   // site's own handlers (React listens at its root, Angular on the element), holds them back,
-  // scans the photo, and then re-dispatches them with the original, the pixelated version, or
-  // nothing. Covers every <input type="file"> in the page, including ones added later.
-  // The service worker cannot run Tesseract (no DOM, no Web Workers), so it relays the photo to
-  // the side panel, which already ships the OCR engine and language data.
+  // scans the file, and then re-dispatches them with the original, the safe version, or nothing.
+  // Covers every <input type="file"> in the page, including ones added later.
+  // Photos: the service worker cannot run Tesseract (no DOM, no Web Workers), so it relays the photo
+  // to the side panel, which ships the OCR engine; the panel returns each finding with its boxes and
+  // the dialog below pixelates only the findings the user keeps ON.
+  // PDFs: the service worker extracts the text with PDF.js and runs the detectors; the safe version
+  // is that text with the findings kept ON replaced by [TYPE_MASKED], uploaded as a .txt file.
   // ==========================================================================
-  const IMG_STR = {
+  const UP_STR = {
     id: {
       scanning: 'PromptShield sedang memindai gambar…',
+      scanningPdf: 'PromptShield sedang memindai PDF…',
       title: 'Data sensitif terdeteksi di foto',
-      contains: 'Foto ini mengandung:',
-      body: 'Jika dikirim, AI dapat membaca semua data sensitif ini.',
-      safe: 'Kirim versi aman (pixelated)',
-      cancel: 'Batalkan upload',
+      titlePdf: 'Data sensitif terdeteksi di PDF',
+      titleFile: 'Data sensitif terdeteksi di file',
+      body: 'Pilih data yang mau disamarkan. ON = disamarkan, OFF = dibiarkan.',
+      safe: 'Kirim versi aman',
+      cancel: 'Batal',
       anyway: 'Kirim tanpa proteksi (berisiko)',
       safeReady: 'Versi aman siap dikirim',
-      clean: 'Foto aman, tidak ada data sensitif terdeteksi',
-      noSafe: 'Versi aman tidak tersedia untuk foto ini.',
+      noneOn: 'Semua data dibiarkan (OFF). Nyalakan minimal satu untuk mengirim versi aman.',
+      countOn: (n, m) => `${n} dari ${m} akan disamarkan`,
+      unlocated: 'lokasi tak ditemukan: seluruh foto dipixelate',
+      docRow: 'Dokumen identitas',
+      wholePhoto: 'seluruh foto',
+      pdfNote: 'Versi aman PDF dikirim sebagai file teks (.txt) berisi teks PDF dengan data yang disamarkan.',
+      pdfMore: (n) => `… (${n} karakter lagi)`,
       panelTitle: 'Pindai foto sebelum dikirim?',
       panelBody: 'Pemindaian foto berjalan di panel samping PromptShield (OCR di perangkatmu, tanpa internet). Buka panel untuk memindai foto ini.',
       panelScan: 'Buka panel & pindai',
-      scanBody: 'PromptShield sedang memeriksa foto ini di perangkatmu. Foto belum dikirim ke AI.',
+      scanBody: 'PromptShield sedang memeriksa foto ini di perangkatmu. Foto belum dikirim.',
+      pdfScanTitle: 'Memeriksa PDF sebelum dikirim',
+      pdfScanBody: 'PromptShield sedang membaca teks PDF ini di perangkatmu. PDF belum dikirim.',
       skip: 'Kirim tanpa pemindaian',
       panelFail: 'Panel tidak bisa dibuka otomatis. Tekan Alt+Shift+P, lalu pilih fotonya lagi.',
       errTitle: 'Foto tidak bisa dipindai',
-      errBody: 'PromptShield tidak bisa memeriksa foto ini. Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.'
+      errBody: 'PromptShield tidak bisa memeriksa foto ini. Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
+      pdfErrTitle: 'PDF tidak bisa dipindai',
+      pdfErrBody: 'PromptShield tidak bisa membaca PDF ini (mungkin terkunci, rusak, atau terlalu besar). Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
+      buildFail: 'Versi aman gagal dibuat. Tidak ada yang dikirim.'
     },
     en: {
       scanning: 'PromptShield is scanning the image…',
+      scanningPdf: 'PromptShield is scanning the PDF…',
       title: 'Sensitive data found in this photo',
-      contains: 'This photo contains:',
-      body: 'If you send it, the AI can read all of this sensitive data.',
-      safe: 'Send safe version (pixelated)',
-      cancel: 'Cancel upload',
+      titlePdf: 'Sensitive data found in this PDF',
+      titleFile: 'Sensitive data found in these files',
+      body: 'Choose what to mask. ON = masked, OFF = allowed.',
+      safe: 'Send safe version',
+      cancel: 'Cancel',
       anyway: 'Send without protection (risky)',
       safeReady: 'Safe version ready to send',
-      clean: 'Photo is safe, no sensitive data found',
-      noSafe: 'A safe version is not available for this photo.',
+      noneOn: 'Everything is allowed (OFF). Switch at least one on to send a safe version.',
+      countOn: (n, m) => `${n} of ${m} will be masked`,
+      unlocated: 'location not found: whole photo is pixelated',
+      docRow: 'Identity document',
+      wholePhoto: 'whole photo',
+      pdfNote: 'The safe version of a PDF is sent as a text file (.txt) holding the PDF text with the data masked.',
+      pdfMore: (n) => `… (${n} more characters)`,
       panelTitle: 'Scan this photo before sending?',
       panelBody: 'Photo scanning runs in the PromptShield side panel (OCR on your device, no internet). Open the panel to scan this photo.',
       panelScan: 'Open panel & scan',
-      scanBody: 'PromptShield is checking this photo on your device. It has not been sent to the AI yet.',
+      scanBody: 'PromptShield is checking this photo on your device. It has not been sent yet.',
+      pdfScanTitle: 'Checking the PDF before sending',
+      pdfScanBody: 'PromptShield is reading this PDF on your device. It has not been sent yet.',
       skip: 'Send without scanning',
       panelFail: 'The panel could not be opened automatically. Press Alt+Shift+P, then choose the photo again.',
       errTitle: 'Could not scan this photo',
-      errBody: 'PromptShield could not check this photo. Make sure it holds no sensitive data before sending.'
+      errBody: 'PromptShield could not check this photo. Make sure it holds no sensitive data before sending.',
+      pdfErrTitle: 'Could not scan this PDF',
+      pdfErrBody: 'PromptShield could not read this PDF (it may be locked, damaged or too large). Make sure it holds no sensitive data before sending.',
+      buildFail: 'Could not build the safe version. Nothing was sent.'
     }
   };
-  const IS = () => IMG_STR[lang] || IMG_STR.id;
+  const IS = () => UP_STR[lang] || UP_STR.id;
 
   const releasedEvents = new WeakSet();   // events we re-dispatch ourselves
   const pendingInputs = new WeakSet();    // inputs whose files are being scanned
   const isImageFile = (f) => !!f && /^image\//.test(f.type || '');
+  const isPdfFile = (f) => !!f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+  const isGuardedFile = (f) => isImageFile(f) || isPdfFile(f);
 
-  // Three ways a photo reaches the chat: the file picker (<input type="file">), Ctrl+V paste, and
-  // drag & drop. Each is held back the same way and handed to guardImageUpload() as a "source":
-  // {files, release(files?), cancel()}.
+  // Three ways a file reaches the chat: the file picker (<input type="file">), Ctrl+V paste, and
+  // drag & drop. Each is held back the same way and handed to guardUpload() as a "source":
+  // {files, release(files?), cancel()}. Works on ChatGPT, Gemini and WhatsApp Web alike: the
+  // listeners are generic and every file input is hooked, including ones the site creates later.
 
   function onFileInputEvent(e) {
     const input = e.composedPath ? e.composedPath()[0] : e.target;   // real target, even inside an open shadow root
     if (!(input instanceof HTMLInputElement) || input.type !== 'file' || releasedEvents.has(e)) return;
-    if (![...(input.files || [])].some(isImageFile)) return;
-    // Hold the event back: the site must not see the photo until the user has decided.
+    if (![...(input.files || [])].some(isGuardedFile)) return;
+    // Hold the event back: the site must not see the file until the user has decided.
     e.stopImmediatePropagation();
     e.stopPropagation();
     if (e.type !== 'change' || pendingInputs.has(input)) return;
     pendingInputs.add(input);
-    console.info('[PromptShield] image upload intercepted (file picker):', [...input.files].filter(isImageFile).length, 'image(s)');
-    guardImageUpload(inputSource(input))
-      .catch((err) => { dlog('image guard error', err && err.message); })
+    const files = [...input.files];
+    dlog('upload intercepted (file picker):', files.filter(isImageFile).length, 'image(s),', files.filter(isPdfFile).length, 'PDF(s)');
+    guardUpload(inputSource(input))
+      .catch((err) => { dlog('upload guard error', err && err.message); })
       .finally(() => pendingInputs.delete(input));
   }
   window.addEventListener('input', onFileInputEvent, true);
   window.addEventListener('change', onFileInputEvent, true);
 
   // Belt and braces: also hook each file input directly. 'change' is not a composed event, so an
-  // input inside an (open) shadow root never reaches the window listener above.
+  // input inside an (open) shadow root never reaches the window listener above. WhatsApp Web
+  // re-creates its attach inputs each time the attach menu opens, so new inputs are hooked by the
+  // MutationObserver below and again shortly after every click.
   function attachFileHook(input) {
     if (input._psHooked) return;
     input._psHooked = true;
@@ -761,9 +810,9 @@
     inputs.forEach(attachFileHook);
     return inputs.length;
   }
-  console.info('[PromptShield] image guard active (file picker, paste, drag & drop). File inputs on page:', hookFileInputs());
-  // ChatGPT may (re)create its file input when the upload menu opens: re-scan shortly after clicks.
-  document.addEventListener('click', () => { setTimeout(hookFileInputs, 100); }, true);
+  dlog('upload guard active on', SITE, '(images + PDF; file picker, paste, drag & drop). File inputs on page:', hookFileInputs());
+  // The site may (re)create its file input when the upload / attach menu opens: re-scan after clicks.
+  document.addEventListener('click', () => { setTimeout(hookFileInputs, 100); setTimeout(hookFileInputs, 500); }, true);
   new MutationObserver((muts) => {
     for (const m of muts) for (const n of m.addedNodes) {
       if (n.nodeType !== 1) continue;
@@ -772,11 +821,29 @@
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
 
+  /** Paste files into the site's message box (how WhatsApp Web and ChatGPT accept pasted files). */
+  function pasteFilesInto(target, list, text) {
+    const dt = new DataTransfer();
+    for (const f of list) dt.items.add(f);
+    if (text) dt.setData('text/plain', text);
+    const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, composed: true, clipboardData: dt });
+    releasedEvents.add(ev);
+    try { target.focus(); } catch (_) { /* ignore */ }
+    target.dispatchEvent(ev);
+  }
+
   /** Source for a file input: release = swap files (optional) and re-fire input + change. */
   function inputSource(input) {
+    const original = [...input.files];
     return {
-      files: [...input.files],
+      files: original,
       release(files) {
+        // The site may have removed its input while we scanned (WhatsApp closes the attach menu).
+        // An event on a detached input reaches nobody, so hand the files over as a paste instead.
+        if (!input.isConnected) {
+          const target = adapter.pasteTarget();
+          if (target) { dlog('file input detached; releasing via paste'); pasteFilesInto(target, files || original); return; }
+        }
         if (files) {
           const dt = new DataTransfer();
           for (const f of files) dt.items.add(f);
@@ -803,17 +870,18 @@
     try { text = dtIn.getData('text/plain') || ''; } catch (_) { /* ignore */ }
     const coords = { clientX: e.clientX || 0, clientY: e.clientY || 0, screenX: e.screenX || 0, screenY: e.screenY || 0 };
     const fire = (list) => {
+      let to = target && target.isConnected ? target : null;
+      if (e.type === 'paste') {
+        // Our dialog took focus; give it back so the editor pastes at the caret.
+        pasteFilesInto(to || adapter.pasteTarget() || document.body, list, text);
+        return;
+      }
+      if (!to) to = document.body;
       const dt = new DataTransfer();
       for (const f of list) dt.items.add(f);
       if (text) dt.setData('text/plain', text);
-      const init = { bubbles: true, cancelable: true, composed: true };
-      const ev = e.type === 'paste'
-        ? new ClipboardEvent('paste', { ...init, clipboardData: dt })
-        : new DragEvent('drop', { ...init, ...coords, dataTransfer: dt });
+      const ev = new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, ...coords, dataTransfer: dt });
       releasedEvents.add(ev);
-      const to = target && target.isConnected ? target : document.body;
-      // Our dialog took focus; give it back so the editor pastes at the caret.
-      if (e.type === 'paste' && to.focus) { try { to.focus(); } catch (_) { /* ignore */ } }
       to.dispatchEvent(ev);
     };
     return {
@@ -829,15 +897,15 @@
     if (releasedEvents.has(e) || e.composedPath().includes(host)) return;
     const dtIn = e.type === 'paste' ? e.clipboardData : e.dataTransfer;
     const files = dtIn ? [...(dtIn.files || [])] : [];
-    if (!files.some(isImageFile)) return;
-    e.preventDefault();               // stop the browser default (e.g. opening the dropped image)
+    if (!files.some(isGuardedFile)) return;
+    e.preventDefault();               // stop the browser default (e.g. opening the dropped file)
     e.stopImmediatePropagation();
     e.stopPropagation();
     if (transferBusy) return;
     transferBusy = true;
-    console.info('[PromptShield] image upload intercepted (' + e.type + '):', files.filter(isImageFile).length, 'image(s)');
-    guardImageUpload(transferSource(e, files))
-      .catch((err) => { dlog('image guard error', err && err.message); })
+    dlog('upload intercepted (' + e.type + '):', files.filter(isImageFile).length, 'image(s),', files.filter(isPdfFile).length, 'PDF(s)');
+    guardUpload(transferSource(e, files))
+      .catch((err) => { dlog('upload guard error', err && err.message); })
       .finally(() => { transferBusy = false; });
   }
   window.addEventListener('paste', onTransferEvent, true);
@@ -848,36 +916,23 @@
       const r = new FileReader();
       r.onload = () => resolve(String(r.result || ''));
       r.onerror = () => reject(new Error('read_failed'));
-      r.readAsDataURL(file);   // chunk-free: no String.fromCharCode(...bytes) stack overflow on big photos
+      r.readAsDataURL(file);   // chunk-free: no String.fromCharCode(...bytes) stack overflow on big files
     });
   }
 
-  function dataUrlToFile(dataUrl, name, mime) {
-    const b64 = String(dataUrl).split(',')[1] || '';
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new File([bytes], name, { type: mime });
-  }
-
-  function safeFileName(name, mime) {
-    const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png';
-    const base = String(name || 'image').replace(/\.[^.]+$/, '');
-    return 'safe_' + base + ext;
-  }
+  const baseName = (name, fallback) => String(name || fallback).replace(/\.[^.]+$/, '') || fallback;
 
   /** Ask the service worker to open the side panel. Must run synchronously inside a click (user gesture). */
   function openPanelNow() {
     try { chrome.runtime.sendMessage({ type: 'PS_OPEN_SIDE_PANEL' }, () => void chrome.runtime.lastError); } catch (_) { /* ignore */ }
   }
 
-  /** OCR one photo via service worker -> side panel. Resolves {hasPII, types, pixelatedDataUrl, pixelatedMime}. */
-  async function scanImageViaPanel(file, waitForPanel) {
-    const dataUrl = await readAsDataUrl(file);
+  /** chrome.runtime.sendMessage for long scans (own timeout, typed failure). */
+  function sendScan(msg, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timeout')), 180000);   // first OCR loads the model
+      const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
       try {
-        chrome.runtime.sendMessage({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, waitForPanel }, (res) => {
+        chrome.runtime.sendMessage(msg, (res) => {
           clearTimeout(timer);
           const err = chrome.runtime.lastError;
           if (err) reject(new Error(err.message));
@@ -888,9 +943,22 @@
     });
   }
 
-  async function scanAll(images, waitForPanel) {
+  /** OCR one photo via service worker -> side panel. Resolves {hasPII, types, findings:[{type,value,boxes}], width, height}. */
+  async function scanImageViaPanel(file, waitForPanel) {
+    const dataUrl = await readAsDataUrl(file);
+    // First OCR loads the model, so allow a long time.
+    return sendScan({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, waitForPanel }, 180000);
+  }
+
+  /** Extract + scan one PDF in the service worker. Resolves {hasPII, findings:[{id,type,value,label,start,end}], text, safeText}. */
+  async function scanPdf(file) {
+    const dataUrl = await readAsDataUrl(file);
+    return sendScan({ type: 'SCAN_PDF_FOR_PII', dataUrl, fileName: file.name }, 120000);
+  }
+
+  async function scanEach(files, fn) {
     const out = [];
-    for (const file of images) out.push({ file, res: await scanImageViaPanel(file, waitForPanel) });
+    for (const file of files) out.push({ file, res: await fn(file) });
     return out;
   }
 
@@ -899,7 +967,7 @@
    * chosen button's `act` ('cancel' for Escape / scrim click, the safe default); close() removes the
    * dialog without resolving (used when a scan finishes and the dialog is replaced or dismissed).
    */
-  function imageDialog({ danger, title, sub, types, previewUrl, note, spinner, buttons }) {
+  function imageDialog({ danger, title, sub, note, spinner, buttons }) {
     let wrapRef = null;
     const promise = new Promise((resolve) => {
       closeLayer();
@@ -909,17 +977,13 @@
         <div class="sheet sheet-sm img-sheet" role="dialog" aria-modal="true" aria-labelledby="ps-img-title" tabindex="-1">
           <div class="sheet-head"><span class="head-icon${danger ? ' danger' : ''}">${danger ? PS_ICONS.alert : PS_ICONS.shield}</span>
             <div><h2 id="ps-img-title">${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div></div>
-          ${spinner ? `<p class="img-scanning" role="status"><span class="ps-spin" aria-hidden="true"></span><span>${esc(IS().scanning)}</span></p>` : ''}
-          ${types && types.length ? `<p class="img-types">${esc(IS().contains)} <strong>${esc(types.join(', '))}</strong></p>` : ''}
-          ${previewUrl ? `<img class="img-safe-preview" alt="" src="${esc(previewUrl)}">` : ''}
+          ${spinner ? `<p class="img-scanning" role="status"><span class="ps-spin" aria-hidden="true"></span><span>${esc(spinner)}</span></p>` : ''}
           ${note ? `<p class="muted small img-note">${esc(note)}</p>` : ''}
           <div class="img-actions">${buttons.map((b) =>
             `<button type="button" class="btn ${b.cls}" data-act="${esc(b.act)}">${esc(b.label)}</button>`).join('')}</div>
         </div>`;
       layer.appendChild(wrap);
       wrapRef = wrap;
-      const img = wrap.querySelector('.img-safe-preview');
-      if (img) img.addEventListener('error', () => img.remove());   // page CSP may block data: images
       const finish = (act) => { wrap.remove(); resolve(act); };
       for (const b of buttons) {
         wrap.querySelector(`[data-act="${b.act}"]`).addEventListener('click', () => {
@@ -937,30 +1001,236 @@
   }
 
   /**
-   * Show the "Scan this photo before sending?" dialog while OCR runs in the background.
-   * Resolves {user: act} if the user decides first, else {results} or {error}.
+   * Show a "checking…" dialog while `task` runs. Resolves {user: act} if the user decides first,
+   * else {results} or {error}.
    */
-  async function scanWithPrompt(images, waitForPanel) {
+  async function scanWithPrompt(task, { title, sub, spinner }) {
     const s = IS();
     const dlg = imageDialog({
-      title: s.panelTitle, sub: s.scanBody, spinner: true,
+      title, sub, spinner,
       buttons: [
         { act: 'cancel', label: s.cancel, cls: 'btn-secondary' },
         { act: 'skip', label: s.skip, cls: 'btn-quiet-danger' }
       ]
     });
-    const scan = scanAll(images, waitForPanel).then((results) => ({ results }), (error) => ({ error }));
+    const scan = task().then((results) => ({ results }), (error) => ({ error }));
     const first = await Promise.race([dlg.promise.then((act) => ({ user: act })), scan]);
     dlg.close();
     return first;
   }
 
-  async function guardImageUpload(src) {
-    const all = src.files;
-    const images = all.filter(isImageFile);   // every image is scanned: no filename / doc-type filter
+  /** Fail-closed dialog after a scan error: nothing reaches the site until the user decides. */
+  async function errorChoice(src, title, sub) {
     const s = IS();
+    const act = await imageDialog({
+      danger: true, title, sub,
+      buttons: [
+        { act: 'cancel', label: s.cancel, cls: 'btn-secondary' },
+        { act: 'skip', label: s.skip, cls: 'btn-quiet-danger' }
+      ]
+    }).promise;
+    if (act === 'skip') src.release(); else src.cancel();
+  }
 
-    let outcome = await scanWithPrompt(images, false);
+  // ---------- Per-finding "groups": one flagged file each ----------
+
+  /** Photo: findings with their boxes; the safe version pixelates only the boxes switched ON. */
+  async function makeImageGroup(file, res) {
+    const s = IS();
+    let bitmap;
+    try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (_) { bitmap = await createImageBitmap(file); }
+    // Boxes are in the side panel's pixels; normally identical, but scale if the decode differs.
+    const sx = res.width ? bitmap.width / res.width : 1;
+    const sy = res.height ? bitmap.height / res.height : 1;
+    const items = (res.findings || []).map((f, i) => ({
+      id: i,
+      type: f.type,
+      label: typeLabel(f.type),
+      display: partialValue(f.value),
+      lowConfidence: typeof f.confidence === 'number' && f.confidence < settings.confidenceThreshold,
+      approved: true,
+      boxes: (f.boxes || []).map((b) => ({ x: b.x * sx, y: b.y * sy, w: b.w * sx, h: b.h * sy }))
+    }));
+    // A recognised ID document whose values could not be read: offer the whole photo as one row.
+    if (!items.length) {
+      items.push({ id: 0, type: 'DOCUMENT', label: res.docLabel || s.docRow, display: s.wholePhoto, approved: true, boxes: [] });
+    }
+    const keepMime = file.type === 'image/jpeg' || file.type === 'image/webp';
+    const mime = keepMime ? file.type : 'image/png';
+    const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png';
+
+    function paint() {
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(bitmap, 0, 0);
+      const on = items.filter((i) => i.approved);
+      if (on.some((i) => !i.boxes.length)) {
+        // Something switched ON could not be located: only the whole photo is safe.
+        psImageRedact.pixelateRegion(ctx, 0, 0, canvas.width, canvas.height, psImageRedact.blockSizeFor(canvas.width, canvas.height));
+      } else {
+        for (const it of on) for (const b of it.boxes) {
+          psImageRedact.pixelateRegion(ctx, b.x, b.y, b.w, b.h, psImageRedact.blockSizeForBox(b, canvas.width, canvas.height));
+        }
+      }
+      return canvas;
+    }
+
+    return {
+      kind: 'image', file, items,
+      previewHtml: '<canvas class="up-preview" aria-hidden="true"></canvas>',
+      refresh(el) {
+        const pv = el.querySelector('.up-preview');
+        if (!pv) return;
+        const full = paint();
+        const k = Math.min(1, 480 / full.width, 260 / full.height);
+        pv.width = Math.max(1, Math.round(full.width * k));
+        pv.height = Math.max(1, Math.round(full.height * k));
+        pv.getContext('2d').drawImage(full, 0, 0, pv.width, pv.height);
+      },
+      async build() {
+        if (!items.some((i) => i.approved)) return file;      // everything allowed for this photo
+        const canvas = paint();
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, mime, 0.92));
+        if (!blob) throw new Error('encode_failed');
+        return new File([blob], 'safe_' + baseName(file.name, 'image') + ext, { type: mime });
+      },
+      dispose() { if (bitmap && bitmap.close) bitmap.close(); }
+    };
+  }
+
+  /** PDF: the safe version is the extracted text with each finding switched ON replaced by [TYPE_MASKED]. */
+  function makePdfGroup(file, res) {
+    const s = IS();
+    const text = String(res.text || '');
+    const items = (res.findings || []).map((f, i) => ({
+      id: i,
+      type: f.type,
+      label: typeLabel(f.type),
+      display: partialValue(f.value),
+      lowConfidence: typeof f.confidence === 'number' && f.confidence < settings.confidenceThreshold,
+      approved: true,
+      start: f.start, end: f.end, value: f.value
+    }));
+    const safeText = () => psMasker.maskTyped(text, items);
+    const PREVIEW_MAX = 1200;
+    return {
+      kind: 'pdf', file, items,
+      previewHtml: '<pre class="up-text mono"></pre>',
+      refresh(el) {
+        const pv = el.querySelector('.up-text');
+        if (!pv) return;
+        let t;
+        try { t = safeText(); } catch (_) { t = String(res.safeText || ''); }
+        const shown = t.length > PREVIEW_MAX ? t.slice(0, PREVIEW_MAX) : t;
+        pv.innerHTML = esc(shown).replace(/\[([A-Z]+(?:_[A-Z]+)*_MASKED)\]/g, '<mark class="tok">[$1]</mark>') +
+          (t.length > PREVIEW_MAX ? `\n<span class="muted">${esc(s.pdfMore(t.length - PREVIEW_MAX))}</span>` : '');
+      },
+      async build() {
+        if (!items.some((i) => i.approved)) return file;      // everything allowed: the PDF itself
+        return new File([safeText()], 'safe_' + baseName(file.name, 'document') + '.txt', { type: 'text/plain' });
+      },
+      dispose() {}
+    };
+  }
+
+  /**
+   * Per-finding review for flagged uploads: one row + teal switch per finding (ON = mask), a live
+   * preview of the safe version, and Send safe / Cancel / Send without protection.
+   * Resolves 'safe' | 'cancel' | 'anyway'.
+   */
+  function findingsDialog(groups) {
+    const s = IS();
+    const kinds = new Set(groups.map((g) => g.kind));
+    const title = kinds.size > 1 ? s.titleFile : kinds.has('pdf') ? s.titlePdf : s.title;
+    const total = groups.reduce((n, g) => n + g.items.length, 0);
+    return new Promise((resolve) => {
+      closeLayer();
+      const wrap = document.createElement('div');
+      wrap.className = 'scrim-wrap';
+      const sections = groups.map((g, gi) => {
+        const rows = g.items.map((f) => `
+          <li class="row">
+            <label class="row-label" for="ps-up-${gi}-${f.id}">
+              <span class="type">${esc(f.label)}</span>
+              <span class="val mono">${esc(f.display)}</span>
+              ${g.kind === 'image' && !f.boxes.length ? `<span class="badge">${esc(s.unlocated)}</span>` : ''}
+              ${f.lowConfidence ? `<span class="badge">${esc(T.possible)}</span>` : ''}
+            </label>
+            <input id="ps-up-${gi}-${f.id}" class="switch" type="checkbox" role="switch" data-g="${gi}" data-id="${f.id}" ${f.approved ? 'checked' : ''}
+              aria-label="${esc(f.label)} ${esc(f.display)}">
+          </li>`).join('');
+        return `<section class="up-group" data-g="${gi}">
+            <div class="up-file"><span class="up-kind">${g.kind === 'pdf' ? 'PDF' : 'IMG'}</span><span class="up-name">${esc(g.file.name || '')}</span></div>
+            ${g.previewHtml}
+            <div class="list-head">${esc(T.detected)} <span class="num">${g.items.length}</span></div>
+            <ul class="list">${rows}</ul>
+          </section>`;
+      }).join('');
+      wrap.innerHTML = `<div class="scrim"></div>
+        <div class="sheet img-sheet up-sheet" role="dialog" aria-modal="true" aria-labelledby="ps-up-title" aria-describedby="ps-up-sub" tabindex="-1">
+          <div class="sheet-head"><span class="head-icon danger">${PS_ICONS.alert}</span>
+            <div><h2 id="ps-up-title">${esc(title)}</h2><p id="ps-up-sub">${esc(s.body)}</p></div></div>
+          ${sections}
+          ${kinds.has('pdf') ? `<p class="muted small img-note">${esc(s.pdfNote)}</p>` : ''}
+          <p class="count up-count" aria-live="polite"></p>
+          <p class="up-none" role="status" hidden>${esc(s.noneOn)}</p>
+          <div class="img-actions">
+            <button type="button" class="btn btn-primary" data-act="safe">${esc(s.safe)}</button>
+            <button type="button" class="btn btn-secondary" data-act="cancel">${esc(s.cancel)}</button>
+            <button type="button" class="btn btn-quiet-danger" data-act="anyway">${esc(s.anyway)}</button>
+          </div>
+        </div>`;
+      layer.appendChild(wrap);
+      const sheetEl = wrap.querySelector('.sheet');
+      const safeBtn = wrap.querySelector('[data-act="safe"]');
+      const sectionOf = (gi) => wrap.querySelector(`.up-group[data-g="${gi}"]`);
+
+      function update() {
+        const on = groups.reduce((n, g) => n + g.items.filter((i) => i.approved).length, 0);
+        wrap.querySelector('.up-count').textContent = s.countOn(on, total);
+        safeBtn.disabled = on === 0;
+        wrap.querySelector('.up-none').hidden = on !== 0;
+      }
+      const refresh = (gi) => { try { groups[gi].refresh(sectionOf(gi)); } catch (e) { dlog('preview failed', e && e.message); } };
+
+      wrap.querySelectorAll('.switch').forEach((sw) => sw.addEventListener('change', () => {
+        const g = groups[Number(sw.dataset.g)];
+        const it = g && g.items.find((i) => i.id === Number(sw.dataset.id));
+        if (it) it.approved = sw.checked;
+        update();
+        refresh(Number(sw.dataset.g));
+      }));
+      const finish = (act) => { wrap.remove(); resolve(act); };
+      safeBtn.addEventListener('click', () => { if (!safeBtn.disabled) finish('safe'); });
+      wrap.querySelector('[data-act="cancel"]').addEventListener('click', () => finish('cancel'));
+      wrap.querySelector('[data-act="anyway"]').addEventListener('click', () => finish('anyway'));
+      wrap.querySelector('.scrim').addEventListener('click', () => finish('cancel'));
+      sheetEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish('cancel'); return; }
+        if (e.key === 'Tab') {
+          const f = [...sheetEl.querySelectorAll('button:not([disabled]), input')];
+          if (!f.length) return;
+          const first = f[0], last = f[f.length - 1];
+          const active = root.activeElement;
+          if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+        }
+      });
+
+      groups.forEach((_, gi) => refresh(gi));
+      update();
+      requestAnimationFrame(() => { wrap.classList.add('in'); safeBtn.focus(); });
+    });
+  }
+
+  /** Scan photos via the side panel (opening it if needed). Resolves results, or null when the upload was settled. */
+  async function scanImages(src, images) {
+    const s = IS();
+    const prompt = { title: s.panelTitle, sub: s.scanBody, spinner: s.scanning };
+    let outcome = await scanWithPrompt(() => scanEach(images, (f) => scanImageViaPanel(f, false)), prompt);
 
     if (outcome.error && /panel_closed/.test(outcome.error.message)) {
       // OCR lives in the side panel; ask before opening it (opening needs this click as a user gesture).
@@ -972,68 +1242,82 @@
           { act: 'skip', label: s.skip, cls: 'btn-quiet-danger' }
         ]
       }).promise;
-      if (act === 'cancel') { src.cancel(); return; }
-      if (act === 'skip') { src.release(); return; }
-      outcome = await scanWithPrompt(images, true);
+      if (act === 'cancel') { src.cancel(); return null; }
+      if (act === 'skip') { src.release(); return null; }
+      outcome = await scanWithPrompt(() => scanEach(images, (f) => scanImageViaPanel(f, true)), prompt);
       if (outcome.error && /panel_closed/.test(outcome.error.message)) {
         src.cancel();
         toast(s.panelFail, 'error', { duration: 9000 });
-        return;
+        return null;
       }
     }
+    if (outcome.user) { if (outcome.user === 'skip') src.release(); else src.cancel(); return null; }
+    if (outcome.error) { await errorChoice(src, s.errTitle, s.errBody); return null; }
+    return outcome.results;
+  }
 
-    // The user decided while the scan was still running.
-    if (outcome.user) {
-      if (outcome.user === 'skip') src.release(); else src.cancel();
-      return;
+  async function guardUpload(src) {
+    const all = src.files;
+    const images = all.filter(isImageFile);   // every image is scanned: no filename / doc-type filter
+    const pdfs = all.filter((f) => !isImageFile(f) && isPdfFile(f));
+    const s = IS();
+    const flagged = [];   // [{file, kind, res}]
+
+    if (pdfs.length) {
+      const outcome = await scanWithPrompt(() => scanEach(pdfs, scanPdf), { title: s.pdfScanTitle, sub: s.pdfScanBody, spinner: s.scanningPdf });
+      if (outcome.user) { if (outcome.user === 'skip') src.release(); else src.cancel(); return; }
+      if (outcome.error) { dlog('pdf scan failed', outcome.error.message); await errorChoice(src, s.pdfErrTitle, s.pdfErrBody); return; }
+      for (const r of outcome.results) if (r.res.hasPII) flagged.push({ ...r, kind: 'pdf' });
+    }
+    if (images.length) {
+      const results = await scanImages(src, images);
+      if (!results) return;
+      for (const r of results) if (r.res.hasPII) flagged.push({ ...r, kind: 'image' });
     }
 
-    if (outcome.error) {
-      // Fail closed: nothing reaches the site until the user decides.
-      const act = await imageDialog({
-        danger: true, title: s.errTitle, sub: s.errBody,
-        buttons: [
-          { act: 'cancel', label: s.cancel, cls: 'btn-secondary' },
-          { act: 'skip', label: s.skip, cls: 'btn-quiet-danger' }
-        ]
-      }).promise;
-      if (act === 'skip') src.release(); else src.cancel();
-      return;
-    }
-
-    const results = outcome.results;
-    const flagged = results.filter((r) => r.res.hasPII);
     if (!flagged.length) {
-      src.release();          // clean: the prompt is already gone, upload proceeds silently
+      src.release();          // clean: the upload proceeds silently
       return;
     }
 
-    const types = [...new Set(flagged.flatMap((r) => r.res.types || []))];
-    const canSafe = flagged.every((r) => r.res.pixelatedDataUrl);
-    const buttons = [];
-    if (canSafe) buttons.push({ act: 'safe', label: s.safe, cls: 'btn-primary' });
-    buttons.push({ act: 'cancel', label: s.cancel, cls: 'btn-secondary' });
-    buttons.push({ act: 'anyway', label: s.anyway, cls: 'btn-quiet-danger' });
-    setStatus('blocked');
-    const act = await imageDialog({
-      danger: true, title: s.title, sub: s.body, types,
-      previewUrl: canSafe ? flagged[0].res.pixelatedDataUrl : '',
-      note: canSafe ? '' : s.noSafe,
-      buttons
-    }).promise;
+    let groups;
+    try {
+      groups = await Promise.all(flagged.map((r) => (r.kind === 'pdf' ? makePdfGroup(r.file, r.res) : makeImageGroup(r.file, r.res))));
+    } catch (e) {
+      dlog('could not prepare review', e && e.message);
+      await errorChoice(src, s.errTitle, s.errBody);
+      return;
+    }
 
-    if (act === 'safe') {
-      const files = all.map((f) => {
-        const r = flagged.find((x) => x.file === f);
-        return r ? dataUrlToFile(r.res.pixelatedDataUrl, safeFileName(f.name, r.res.pixelatedMime), r.res.pixelatedMime) : f;
-      });
-      src.release(files);
-      setStatus('protected');
-      toast(s.safeReady, 'success');
-    } else if (act === 'anyway') {
-      src.release();
-    } else {
-      src.cancel();
+    setStatus('blocked');
+    try {
+      const act = await findingsDialog(groups);
+      if (act === 'safe') {
+        let files;
+        try {
+          files = await Promise.all(all.map((f) => {
+            const g = groups.find((x) => x.file === f);
+            return g ? g.build() : f;
+          }));
+        } catch (e) {
+          dlog('safe version failed', e && e.message);
+          src.cancel();
+          toast(s.buildFail, 'error', { duration: 8000 });
+          return;
+        }
+        src.release(files);
+        setStatus('protected');
+        const byType = {};
+        for (const g of groups) for (const it of g.items) if (it.approved && it.type !== 'DOCUMENT') byType[it.type] = (byType[it.type] || 0) + 1;
+        if (Object.keys(byType).length) sendBG({ action: PS_ACTIONS.RECORD, update: { items: byType } }).catch(() => {});
+        toast(s.safeReady, 'success');
+      } else if (act === 'anyway') {
+        src.release();
+      } else {
+        src.cancel();
+      }
+    } finally {
+      for (const g of groups) g.dispose();
     }
   }
 
@@ -1502,7 +1786,19 @@ mark.tok { font-family: var(--ps-mono); font-size: .92em; background: var(--ps-a
 .head-icon.danger { background: var(--ps-danger-soft); color: var(--ps-danger); }
 .img-types { margin: 0; font-size: var(--ps-fs-13); color: var(--ps-fg-2); line-height: 1.5; }
 .img-types strong { color: var(--ps-fg); font-weight: 600; }
-.img-safe-preview { display: block; max-width: 100%; max-height: 200px; margin: 0 auto; border-radius: var(--ps-r-sm); border: 1px solid var(--ps-line); }
+/* Upload review: per-finding switches */
+.up-group { display: flex; flex-direction: column; gap: var(--ps-sp-3); }
+.up-group + .up-group { border-top: 1px solid var(--ps-line); padding-top: var(--ps-sp-4); }
+.up-file { display: flex; align-items: center; gap: var(--ps-sp-2); min-width: 0; font-size: var(--ps-fs-13); font-weight: 500; }
+.up-kind { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ps-accent); background: var(--ps-accent-soft); border-radius: 4px; padding: 1px 6px; }
+.up-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-preview { display: block; max-width: 100%; margin: 0 auto; border-radius: var(--ps-r-sm); border: 1px solid var(--ps-line); background: var(--ps-bg-2); }
+.up-text { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: var(--ps-fs-12); line-height: 1.6; background: var(--ps-bg-2);
+  border-radius: var(--ps-r-md); padding: var(--ps-sp-3) var(--ps-sp-4); max-height: 180px; overflow: auto; }
+.up-count { margin: 0; }
+.up-none { margin: 0; font-size: var(--ps-fs-13); color: var(--ps-warn); background: var(--ps-warn-soft); border-radius: var(--ps-r-sm); padding: var(--ps-sp-2) var(--ps-sp-3); }
+.up-none[hidden] { display: none; }
+.img-actions .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
 .img-note { margin: 0; }
 .img-scanning { display: flex; align-items: center; gap: var(--ps-sp-2); margin: 0; font-size: var(--ps-fs-13); color: var(--ps-accent); }
 .img-actions { display: flex; flex-direction: column; gap: var(--ps-sp-2); }

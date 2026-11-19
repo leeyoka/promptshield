@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PromptShield",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Masks personal data on your device before it reaches AI chats, restores it in replies, and suggests right-sized models.",
   "permissions": [
     "storage",
@@ -15,7 +15,8 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://web.whatsapp.com/*"
       ],
       "js": [
         "src/shared/constants.js",
@@ -25,6 +26,7 @@
         "src/shared/complexity.js",
         "src/shared/restorer.js",
         "src/shared/masker.js",
+        "src/shared/image-redact.js",
         "src/content/early-guard.js"
       ],
       "run_at": "document_start"
@@ -33,7 +35,8 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://web.whatsapp.com/*"
       ],
       "js": [
         "src/content/content-script.js"

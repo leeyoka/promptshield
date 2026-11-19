@@ -110,7 +110,7 @@ var PS_DEFAULTS = {
   lang: 'auto',               // 'auto' | 'id' | 'en'
   vaultTtlHours: 24,
   debug: false,               // debug logs (types, counts, timings only)
-  allowedHosts: ['chatgpt.com', 'chat.openai.com', 'gemini.google.com']
+  allowedHosts: ['chatgpt.com', 'chat.openai.com', 'gemini.google.com', 'web.whatsapp.com']
 };
 
 // Kept for the web demo highlight colours.

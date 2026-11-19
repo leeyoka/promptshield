@@ -27,6 +27,17 @@ var psMasker = (function () {
     return out + text.slice(cursor);
   }
 
+  /**
+   * Replace approved findings with a fixed, non-reversible placeholder such as [NIK_MASKED].
+   * Used for the text version of an uploaded document (no vault token: it is not restored later).
+   * Same offset checks as build(): throws on stale offsets.
+   */
+  function maskTyped(text, items) {
+    const tokens = {};
+    for (const i of items) tokens[i.id] = `[${i.type}_MASKED]`;
+    return build(text, items, tokens);
+  }
+
   /** Show only the edges of a value, e.g. 3171••••••••0002 (for lists; never for sending). */
   function partialValue(v) {
     const s = String(v || '');
@@ -80,7 +91,7 @@ var psMasker = (function () {
     return esc.replace(/\[([A-Z]+(?:_[A-Z]+)*_\d+)\]/g, '<mark class="tok">[$1]</mark>');
   }
 
-  return { build, partialValue, canonical, createLocalTokenizer, highlightTokensHtml };
+  return { build, maskTyped, partialValue, canonical, createLocalTokenizer, highlightTokensHtml };
 })();
 
 if (typeof globalThis !== 'undefined') globalThis.psMasker = psMasker;

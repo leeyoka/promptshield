@@ -635,9 +635,11 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     }
   }
 
+  const variantScale = (bitmap) => Math.min(3, Math.max(0.5, OCR_TARGET_PX / Math.max(bitmap.width, bitmap.height)));
+
   function makeVariant(bitmap, rot, mode) {
     const w0 = bitmap.width, h0 = bitmap.height;
-    const scale = Math.min(3, Math.max(0.5, OCR_TARGET_PX / Math.max(w0, h0)));
+    const scale = variantScale(bitmap);
     const w = Math.round(w0 * scale), h = Math.round(h0 * scale);
     const swap = rot === 90 || rot === 270;
     const canvas = document.createElement('canvas');
@@ -814,6 +816,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     let analysis = null;
     let allText = '';
     let bitmap = null;
+    const passes = [];                   // word boxes per OCR pass, to locate each finding later
     try {
       let worker;
       [worker, bitmap] = await Promise.all([getTesseractWorker(), loadBitmap(file)]);
@@ -822,8 +825,10 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
         if (seq !== scanSeq) { if (bitmap.close) bitmap.close(); return { status: 'cancelled' }; }
         const { rot, mode } = OCR_PASSES[i];
         if (i > 0) imgScanning.textContent = ss.scanStep(i + 1, OCR_PASSES.length);
-        const { data } = await worker.recognize(makeVariant(bitmap, rot, mode));
+        const { data } = await worker.recognize(makeVariant(bitmap, rot, mode), {}, { text: true, blocks: true });
         const text = (data && data.text) || '';
+        const scale = variantScale(bitmap);
+        passes.push({ rot, scale, w: Math.round(bitmap.width * scale), h: Math.round(bitmap.height * scale), words: psImageRedact.wordsFromTesseract(data) });
         allText += '\n' + text;
         analysis = psDocScan.analyze(allText, (typeof psDetectAll === 'function') ? psDetectAll : null);
         if (analysis.sensitive || analysis.findings.some((f) => f.type !== 'NAME')) break;
@@ -873,6 +878,14 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
         : (lang === 'id' ? '⚠️ Data sensitif terdeteksi' : '⚠️ Sensitive data detected');
       showResult('warn', title, ss.warnBody, fieldLabels);
 
+      // Where each finding sits in the photo (photo pixels), so a page can mask finding by finding.
+      let boxes = [];
+      try { boxes = psImageRedact.locateFindings(passes, analysis.findings, bitmap.width, bitmap.height); } catch (_) { boxes = []; }
+      const located = analysis.findings.map((f, i) => ({
+        type: f.type, value: f.value, confidence: f.confidence, boxes: boxes[i] || []
+      }));
+      const size = { width: bitmap.width, height: bitmap.height };
+
       // Add-on: pixelate the PII on a copy of the photo for a safe download.
       let redaction = null;
       try {
@@ -880,7 +893,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
       } catch (_) { redaction = null; }
       closeBitmap();
       showRedaction(redaction, originalFileName, file);
-      return { status: 'pii', labels: fieldLabels, docType: analysis.docType, redaction };
+      return { status: 'pii', labels: fieldLabels, docType: analysis.docType, docLabel, redaction, findings: located, size };
     } else {
       closeBitmap();
       const okTitle = lang === 'id' ? '✅ Tidak ada data sensitif' : '✅ No sensitive data found';
@@ -894,21 +907,10 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   }
 
 
-  // ── Scan requests from ChatGPT / Gemini (relayed by the service worker) ────
-  // The content script holds an upload back while the photo is scanned here with the same OCR +
-  // pixelation pipeline; the result (and the pixelated copy) goes back the same way.
-  function canvasToDataUrl(canvas, mime) {
-    return new Promise((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (!blob) { reject(new Error('encode_failed')); return; }
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result || ''));
-        r.onerror = () => reject(new Error('encode_failed'));
-        r.readAsDataURL(blob);
-      }, mime, 0.92);
-    });
-  }
-
+  // ── Scan requests from ChatGPT / Gemini / WhatsApp Web (relayed by the service worker) ────
+  // The content script holds an upload back while the photo is scanned here with the same OCR
+  // pipeline; the findings and where they sit in the photo go back the same way, and the page
+  // pixelates only the findings the user keeps switched on.
   async function scanForPage(msg) {
     const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/i.exec(String(msg.dataUrl || ''));
     if (!m) return { success: false, error: 'bad_image' };
@@ -921,13 +923,16 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     if (r.status === 'error') return { success: false, error: 'ocr_failed' };
     // No readable text (a landscape, a meme, …) or nothing sensitive: let it through.
     if (r.status !== 'pii') return { success: true, hasPII: false, types: [] };
-    const out = { success: true, hasPII: true, types: r.labels || [], docType: r.docType || null };
-    if (r.redaction && r.redaction.boxes) {
-      const o = redactedOutput(file);
-      out.pixelatedMime = o.mime;
-      out.pixelatedDataUrl = await canvasToDataUrl(r.redaction.canvas, o.mime);
-    }
-    return out;
+    // Per-finding boxes (photo pixels): the page lets the user choose what to pixelate.
+    return {
+      success: true, hasPII: true,
+      types: r.labels || [],
+      docType: r.docType || null,
+      docLabel: r.docLabel || '',
+      findings: r.findings || [],
+      width: r.size ? r.size.width : 0,
+      height: r.size ? r.size.height : 0
+    };
   }
 
   if (hasChrome && chrome.runtime.onMessage) {
