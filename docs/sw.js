@@ -23,9 +23,7 @@ const PRECACHE = [
   'js/detectors.js',
   'js/doc-scan.js',
   'js/scanner.js',
-  'assets/logo.svg',
-  'assets/icon-192.png',
-  'assets/icon-512.png'
+  'assets/logo.png'
 ];
 
 // Everything the photo/PDF scanner needs offline. Fetched in the background on request
