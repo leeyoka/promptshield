@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptShield · Energi</title>
+  <meta name="description" content="Kenapa PromptShield menyarankan model AI yang lebih kecil: estimasi energi per prompt, rumus penghematan, dan sumber datanya.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="assets/logo.png" type="image/png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/logo.png">
+  <meta name="theme-color" content="#1a3fcc">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,700;1,9..144,900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Same tokens, nav and footer as index.html. */
+    :root {
+      --bg:          #f7f4ef;
+      --bg-card:     #ffffff;
+      --bg-nav:      rgba(247, 244, 239, 0.85);
+      --accent:      #1a3fcc;
+      --accent-soft: #e8ecfb;
+      --ok:          #16a34a;
+      --warn:        #ea580c;
+      --fg:          #0f0f0f;
+      --fg-2:        #3d3d3d;
+      --fg-3:        #888888;
+      --border:      rgba(0, 0, 0, 0.08);
+      --shadow-sm:   0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+      --radius:      16px;
+      --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: var(--sans); font-size: 16px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased; overflow-x: hidden;
+    }
+    a { color: inherit; }
+    button { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+    .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+    @media (min-width: 640px) { .wrap { padding: 0 24px; } }
+    .narrow { max-width: 760px; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border-radius: 100px; padding: 10px 20px; min-height: 44px;
+      font: 500 15px/1 var(--sans); text-decoration: none; cursor: pointer;
+      border: 1.5px solid transparent; transition: background 160ms ease;
+    }
+    .btn-dark { background: #0f0f0f; color: #fff; }
+    .btn-dark:hover { background: #2a2a2a; }
+    .btn-sm { min-height: 38px; padding: 8px 18px; font-size: 14px; }
+
+    .nav {
+      position: sticky; top: 0; z-index: 20; background: var(--bg-nav);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 9px; font: 600 16px/1 var(--sans); text-decoration: none; letter-spacing: -0.01em; }
+    .brand svg { width: 26px; height: 26px; color: var(--accent); flex: none; }
+    .nav-right { display: flex; align-items: center; gap: 14px; }
+    .nav-link { font: 500 14px/1 var(--sans); color: var(--fg-2); text-decoration: none; padding: 6px 2px; }
+    .nav-link:hover { color: var(--fg); }
+    .nav-link[aria-current="page"] { color: var(--accent); }
+    .lang { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 4px; font: 500 13px/1 var(--sans); color: var(--fg-3); cursor: pointer; }
+    .lang .on { color: var(--fg); }
+    .lang .sep { color: rgba(0, 0, 0, 0.18); }
+    @media (max-width: 420px) { .nav .btn { display: none; } }
+
+    .hero { padding: 64px 0 40px; text-align: center; }
+    .pill { display: inline-block; margin: 0 0 20px; background: var(--accent-soft); color: var(--accent); font: 500 12px/1.4 var(--sans); border-radius: 100px; padding: 5px 14px; }
+    h1 {
+      font-family: var(--serif); font-weight: 900; font-size: clamp(2.3rem, 5.5vw, 3.6rem);
+      line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 18px; text-wrap: balance;
+    }
+    h1 em { font-style: italic; font-weight: 700; color: var(--accent); }
+    .lead { font: 400 17px/1.65 var(--sans); color: var(--fg-2); max-width: 600px; margin: 0 auto; text-wrap: pretty; }
+    h2 { font: 700 1.75rem/1.2 var(--serif); letter-spacing: -0.015em; margin: 0 0 10px; }
+    .sub { color: var(--fg-2); margin: 0 0 20px; }
+    section { padding: 40px 0; }
+
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 24px; }
+    @media (max-width: 479px) { .card { padding: 18px; } }
+
+    /* Core fact */
+    .fact { display: grid; gap: 18px; align-items: center; grid-template-columns: auto 1fr; }
+    @media (max-width: 559px) { .fact { grid-template-columns: 1fr; } }
+    .fact-num { font: 900 3.4rem/1 var(--serif); color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .fact-num small { font: 600 1.1rem/1 var(--sans); color: var(--fg-2); margin-left: 4px; }
+    .fact p { margin: 0 0 8px; }
+    .cite { font-size: 13px; color: var(--fg-3); }
+    .cite a { color: var(--accent); }
+
+    /* Bars */
+    .bars { display: grid; gap: 18px; margin: 4px 0 8px; }
+    .bar-row { display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center; }
+    @media (max-width: 479px) { .bar-row { grid-template-columns: 1fr; gap: 6px; } }
+    .bar-label { font: 600 14px/1.2 var(--sans); }
+    .bar-track { position: relative; height: 30px; background: #f1eee8; border-radius: 8px; }
+    .bar-range { position: absolute; top: 0; bottom: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; font: 600 12px/1 var(--sans); color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .t-small  { background: var(--ok); }
+    .t-medium { background: #ca8a04; }
+    .t-large  { background: var(--warn); }
+    .anchor { position: absolute; top: -6px; bottom: -6px; width: 0; border-left: 2px dashed var(--fg); }
+    .axis { display: grid; grid-template-columns: 80px 1fr; gap: 12px; }
+    @media (max-width: 479px) { .axis { grid-template-columns: 1fr; } .axis > span:first-child { display: none; } }
+    .axis-scale { position: relative; height: 20px; font: 500 11px/1 var(--sans); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+    .axis-scale span { position: absolute; transform: translateX(-50%); top: 6px; }
+    .axis-scale span:first-child { transform: none; }
+    .axis-scale span:last-child { transform: translateX(-100%); }
+    .legend { font-size: 13px; color: var(--fg-2); margin: 12px 0 0; display: flex; align-items: center; gap: 8px; }
+    .legend i { display: inline-block; width: 0; height: 14px; border-left: 2px dashed var(--fg); }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; margin-top: 22px; }
+    table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font: 600 13px/1.3 var(--sans); color: var(--fg-3); text-transform: uppercase; letter-spacing: .04em; }
+    td:nth-child(2) { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .tier { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+    .tier::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+    .estimate-note { margin: 14px 0 0; font-size: 13px; color: var(--fg-2); background: #fef3c7; border-radius: 10px; padding: 10px 14px; }
+
+    /* Formula */
+    .formula {
+      margin: 6px 0 16px; padding: 22px 16px; text-align: center; border-radius: 12px; background: var(--accent-soft);
+      font: 600 clamp(1.05rem, 3.4vw, 1.45rem)/1.4 var(--mono); color: var(--fg); overflow-x: auto;
+    }
+    .formula .op { color: var(--accent); padding: 0 .3em; }
+    .formula sub { font-size: .65em; }
+    .defs { margin: 0; padding-left: 20px; color: var(--fg-2); }
+    .defs li { margin: 4px 0; }
+    .example { margin: 14px 0 0; font-size: 15px; }
+    .example code { font-family: var(--mono); background: #f1eee8; border-radius: 6px; padding: 2px 6px; }
+
+    /* Plain language */
+    .plain { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: start; }
+    .plain svg { width: 44px; height: 44px; color: #ca8a04; }
+    .plain p { margin: 0; font-size: 17px; line-height: 1.7; }
+
+    .footnote { text-align: center; font-size: 13px; color: var(--fg-3); margin: 8px auto 48px; max-width: 60ch; }
+    footer { background: #0f0f0f; color: #888; padding: 32px 24px; text-align: center; font: 400 13px/1.5 var(--sans); }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="PromptShield">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2.5l7.5 2.8v6.2c0 4.9-3.2 8.3-7.5 10-4.3-1.7-7.5-5.1-7.5-10V5.3L12 2.5z"/>
+          <path d="M8.6 11.8l2.4 2.4 4.4-4.6"/>
+        </svg>
+        <span>PromptShield</span>
+      </a>
+      <div class="nav-right">
+        <a class="nav-link" href="energy.html" aria-current="page" data-i18n="nav_energy">Energi</a>
+        <button type="button" class="lang" id="lang-toggle" aria-label="Ganti bahasa / Switch language">
+          <span data-lang="id">ID</span><span class="sep" aria-hidden="true">|</span><span data-lang="en">EN</span>
+        </button>
+        <a class="btn btn-dark btn-sm" href="./#install" data-i18n="nav_cta">Pasang di Chrome</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero wrap narrow">
+      <p class="pill" data-i18n="tag">Right-size · Energi</p>
+      <h1 data-i18n-html="title">Model yang <em>cukup</em>, bukan yang terbesar.</h1>
+      <p class="lead" data-i18n="lead">Selain melindungi data, PromptShield menyarankan model AI yang lebih kecil saat tugasmu sederhana. Halaman ini menjelaskan angka dan rumus di balik saran itu.</p>
+    </div>
+
+    <!-- a) Core fact -->
+    <section class="wrap narrow" aria-labelledby="fact-title">
+      <h2 id="fact-title" data-i18n="fact_title">Fakta dasarnya</h2>
+      <div class="card fact">
+        <div class="fact-num">~0,24<small>Wh</small></div>
+        <div>
+          <p data-i18n-html="fact_body">Satu prompt teks median ke Gemini memakai <strong>~0,24 Wh</strong> energi. Mengirim tugas ringan ke model besar padahal model kecil sudah cukup membuang energi, dan itu bertambah besar di jutaan pengguna.</p>
+          <p class="cite"><span data-i18n="source">Sumber:</span> Google — Elsworth et al., <a href="https://arxiv.org/abs/2508.15734" target="_blank" rel="noopener"><cite>Measuring the environmental impact of delivering AI at Google Scale</cite></a> (arXiv:2508.15734, Agustus 2025), <span data-i18n="source_note">median prompt teks Gemini Apps. Dikutip dalam riset PromptShield.</span></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- b) Comparison -->
+    <section class="wrap narrow" aria-labelledby="cmp-title">
+      <h2 id="cmp-title" data-i18n="cmp_title">Perbandingan ukuran model</h2>
+      <p class="sub" data-i18n="cmp_sub">Estimasi energi per prompt (Wh). Garis putus-putus = angka median Google di atas.</p>
+      <div class="card">
+        <div class="bars" role="img" data-i18n-aria="bars_aria" aria-label="Estimasi energi per prompt: kecil 0,05–0,1 Wh, sedang 0,1–0,2 Wh, besar 0,2–0,4 Wh.">
+          <!-- Scale 0–0.4 Wh: left% = value / 0.4 * 100 -->
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="small">Kecil</span>
+            <div class="bar-track"><span class="bar-range t-small" style="left:12.5%;width:12.5%">0,05–0,1</span><span class="anchor" style="left:60%"></span></div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="medium">Sedang</span>
+            <div class="bar-track"><span class="bar-range t-medium" style="left:25%;width:25%">0,1–0,2</span><span class="anchor" style="left:60%"></span></div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="large">Besar</span>
+            <div class="bar-track"><span class="bar-range t-large" style="left:50%;width:50%">0,2–0,4</span><span class="anchor" style="left:60%"></span></div>
+          </div>
+          <div class="axis" aria-hidden="true">
+            <span></span>
+            <div class="axis-scale"><span style="left:0">0</span><span style="left:25%">0,1</span><span style="left:50%">0,2</span><span style="left:75%">0,3</span><span style="left:100%">0,4 Wh</span></div>
+          </div>
+        </div>
+        <p class="legend"><i aria-hidden="true"></i><span data-i18n="legend">0,24 Wh: median prompt teks Gemini (Google, 2025)</span></p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th data-i18n="th_size">Ukuran model</th><th data-i18n="th_energy">Estimasi energi per prompt</th><th data-i18n="th_use">Pakai untuk</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tier" style="--c:var(--ok)" data-i18n="small">Kecil</span></td><td>~0,05–0,1 Wh</td><td data-i18n="use_small">Tugas sederhana: menerjemahkan, meringkas teks pendek, memperbaiki salah ketik</td></tr>
+              <tr><td><span class="tier" style="--c:#ca8a04" data-i18n="medium">Sedang</span></td><td>~0,1–0,2 Wh</td><td data-i18n="use_medium">Tugas menengah: draf, analisis, tanya-jawab</td></tr>
+              <tr><td><span class="tier" style="--c:var(--warn)" data-i18n="large">Besar</span></td><td>~0,2–0,4 Wh</td><td data-i18n="use_large">Tugas kompleks: penalaran, dokumen panjang, coding</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="estimate-note" data-i18n="estimate_note">Ini estimasi berdasarkan data yang dipublikasikan, bukan hasil pengukuran. Energi sebenarnya bergantung pada panjang jawaban, perangkat keras, dan pusat data penyedia.</p>
+      </div>
+    </section>
+
+    <!-- c) Formula -->
+    <section class="wrap narrow" aria-labelledby="formula-title">
+      <h2 id="formula-title" data-i18n="formula_title">Rumus yang kami pakai</h2>
+      <p class="sub" data-i18n="formula_sub">Terbuka dan sederhana, supaya kamu bisa memeriksanya sendiri.</p>
+      <div class="card">
+        <div class="formula" role="math" aria-label="Energi hemat per saran yang diterima kira-kira sama dengan E besar dikurangi E kecil">
+          <span data-i18n="formula_lhs">Energi hemat per saran diterima</span> <span class="op">≈</span> E<sub data-i18n="sub_large">besar</sub> <span class="op">−</span> E<sub data-i18n="sub_small">kecil</sub>
+        </div>
+        <ul class="defs">
+          <li data-i18n-html="def_large"><strong>E<sub>besar</sub></strong>: estimasi energi satu prompt di model besar (model bawaan yang biasanya dipakai situs chat).</li>
+          <li data-i18n-html="def_small"><strong>E<sub>kecil</sub></strong>: estimasi energi prompt yang sama di model kecil yang disarankan.</li>
+          <li data-i18n="def_accept">Hanya dihitung saat kamu menerima saran. Kalau kamu memang sudah memakai model kecil, penghematannya ≈ 0.</li>
+        </ul>
+        <p class="example" data-i18n-html="example">Contoh dengan angka di tabel: <code>(0,2–0,4) − (0,05–0,1) ≈ 0,1–0,35 Wh</code> per saran yang diterima.</p>
+      </div>
+    </section>
+
+    <!-- d) Plain language -->
+    <section class="wrap narrow" aria-labelledby="plain-title">
+      <h2 id="plain-title" data-i18n="plain_title">Bahasa sederhananya</h2>
+      <div class="card plain">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0012 3z"/>
+        </svg>
+        <p data-i18n="plain_body">Bayangkan listrik untuk satu prompt besar seperti menyalakan lampu LED selama beberapa menit. Kalau ribuan orang melakukan ini setiap hari, totalnya sangat besar. PromptShield menyarankan model yang cukup untuk tugasmu — hemat energi, hasil tetap baik.</p>
+      </div>
+    </section>
+
+    <!-- e) Note -->
+    <p class="footnote wrap" data-i18n="footnote">Semua estimasi berdasarkan data publik. PromptShield tidak mengukur konsumsi energi secara langsung.</p>
+  </main>
+
+  <footer data-i18n="footer_copy">© 2025 PromptShield · Team Open Minded · Techtonic 3.0</footer>
+
+  <script>
+    (() => {
+      'use strict';
+      // Indonesian is in the markup; English is applied by the same ID|EN toggle as the home page
+      // (shared preference: localStorage 'ps_site_lang').
+      const EN = {
+        nav_energy: 'Energy',
+        nav_cta: 'Add to Chrome',
+        tag: 'Right-size · Energy',
+        title: 'The model that is <em>enough</em>, not the biggest.',
+        lead: 'Besides protecting your data, PromptShield suggests a smaller AI model when your task is simple. This page explains the numbers and the formula behind that suggestion.',
+        fact_title: 'The core fact',
+        fact_body: 'A single median text prompt to Gemini uses <strong>~0.24 Wh</strong>. Sending a light task to a large model when a small one suffices wastes energy, and that adds up across millions of users.',
+        source: 'Source:',
+        source_note: 'median Gemini Apps text prompt. Cited in PromptShield’s research.',
+        cmp_title: 'Model sizes compared',
+        cmp_sub: 'Estimated energy per prompt (Wh). Dashed line = Google’s median figure above.',
+        bars_aria: 'Estimated energy per prompt: small 0.05–0.1 Wh, medium 0.1–0.2 Wh, large 0.2–0.4 Wh.',
+        small: 'Small', medium: 'Medium', large: 'Large',
+        legend: '0.24 Wh: median Gemini text prompt (Google, 2025)',
+        th_size: 'Model size', th_energy: 'Estimated energy per prompt', th_use: 'Use when',
+        use_small: 'Simple tasks: translate, summarize short text, fix typos',
+        use_medium: 'Moderate tasks: drafts, analysis, Q&A',
+        use_large: 'Complex tasks: reasoning, long documents, coding',
+        estimate_note: 'These are estimates based on published data, not measurements. Real energy depends on answer length, hardware and the provider’s data centre.',
+        formula_title: 'The formula we use',
+        formula_sub: 'Open and simple, so you can check it yourself.',
+        formula_lhs: 'Energy saved per accepted suggestion',
+        sub_large: 'large', sub_small: 'small',
+        def_large: '<strong>E<sub>large</sub></strong>: estimated energy of one prompt on a large model (the default most chat sites use).',
+        def_small: '<strong>E<sub>small</sub></strong>: estimated energy of the same prompt on the suggested small model.',
+        def_accept: 'Only counted when you accept the suggestion. If you already use a small model, the saving is ≈ 0.',
+        example: 'Example with the table’s numbers: <code>(0.2–0.4) − (0.05–0.1) ≈ 0.1–0.35 Wh</code> per accepted suggestion.',
+        plain_title: 'In plain words',
+        plain_body: 'Think of the electricity for one large prompt as keeping an LED bulb on for a few minutes. When thousands of people do this every day, the total is very large. PromptShield suggests the model that is enough for your task: less energy, same good result.',
+        footnote: 'All estimates are based on public data. PromptShield does not measure energy use directly.',
+        footer_copy: '© 2025 PromptShield · Team Open Minded · Techtonic 3.0',
+        doc_title: 'PromptShield · Energy'
+      };
+      // Snapshot the Indonesian markup so switching back restores it.
+      const ID = { doc_title: document.title };
+      document.querySelectorAll('[data-i18n]').forEach((el) => { ID[el.dataset.i18n] = el.textContent; });
+      document.querySelectorAll('[data-i18n-html]').forEach((el) => { ID[el.dataset.i18nHtml] = el.innerHTML; });
+      document.querySelectorAll('[data-i18n-aria]').forEach((el) => { ID[el.dataset.i18nAria] = el.getAttribute('aria-label'); });
+
+      let lang = 'id';
+      try { const s = localStorage.getItem('ps_site_lang'); if (s === 'en' || s === 'id') lang = s; } catch (_) { /* storage blocked */ }
+
+      function apply() {
+        const S = lang === 'en' ? EN : ID;
+        document.documentElement.lang = lang;
+        document.title = S.doc_title;
+        document.querySelectorAll('[data-i18n]').forEach((el) => { const v = S[el.dataset.i18n]; if (typeof v === 'string') el.textContent = v; });
+        document.querySelectorAll('[data-i18n-html]').forEach((el) => { const v = S[el.dataset.i18nHtml]; if (typeof v === 'string') el.innerHTML = v; });
+        document.querySelectorAll('[data-i18n-aria]').forEach((el) => { const v = S[el.dataset.i18nAria]; if (typeof v === 'string') el.setAttribute('aria-label', v); });
+        document.querySelectorAll('.bar-range, .axis-scale span, .fact-num, td:nth-child(2)').forEach((el) => {
+          // Decimal comma in Indonesian, point in English.
+          el.childNodes.forEach((n) => { if (n.nodeType === 3) n.textContent = lang === 'en' ? n.textContent.replace(/(\d),(\d)/g, '$1.$2') : n.textContent.replace(/(\d)\.(\d)/g, '$1,$2'); });
+        });
+        document.querySelectorAll('#lang-toggle [data-lang]').forEach((el) => el.classList.toggle('on', el.dataset.lang === lang));
+      }
+      document.getElementById('lang-toggle').addEventListener('click', () => {
+        lang = lang === 'id' ? 'en' : 'id';
+        try { localStorage.setItem('ps_site_lang', lang); } catch (_) { /* storage blocked */ }
+        apply();
+      });
+      apply();
+
+      if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+        window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+      }
+    })();
+  </script>
+</body>
+</html>

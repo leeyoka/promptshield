@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (20 Nov 2026)
+- **Website: energy page** (`docs/energy.html`, linked from the home page nav, precached by `docs/sw.js`, cache v2).
+  The Google median-prompt figure (0.24 Wh, Elsworth et al., arXiv:2508.15734) with its source, a small / medium /
+  large comparison (bars + table, labelled as estimates), the saving formula E(large) − E(small), a plain-language
+  section, and the "estimates only, not measured" note. ID/EN with the site's language toggle.
+- **Side panel: education notes.** Each finding shows one muted line on why that data type is dangerous
+  (NIK, NPWP, KK, phone, email, card, bank account, passport, flight number, booking code, name). Side panel only;
+  the in-page upload popup stays compact.
+- **Side panel: protection counters.** "Sesi ini: X data dilindungi · Y diizinkan" above the findings, live with the
+  switches, and "Total sesi ini: X temuan dilindungi dari Y dokumen dipindai" at the top, counting photos/PDFs scanned
+  and texts copied as a safe version. In memory only: resets when the panel is closed.
+
 ## 1.4.0 (20 Nov 2026)
 **Automatic upload scanning everywhere (incl. WhatsApp Web), and PDF scanning with text extraction + OCR.**
 - **No more "Open panel & scan" click.** Photo OCR used to run only in the side panel, so with the panel closed

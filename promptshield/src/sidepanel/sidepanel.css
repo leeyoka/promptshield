@@ -371,3 +371,14 @@ mark.rest { background: var(--ps-mark); border-bottom: 1.5px dotted var(--ps-acc
 }
 #downloadRedacted:hover { background: #1533a8; }
 .img-pdf-findings { margin: 8px 0; padding-left: 18px; line-height: 1.5; }
+
+/* Education note under each finding: why this data type is dangerous (side panel only). */
+.finding-edu { display: block; font: 400 11px/1.4 var(--ps-font); color: #9a5b00; opacity: .9; white-space: normal; }
+.finding-row.allowed .finding-edu { color: var(--ps-fg-3); }
+.img-pdf-findings .finding-edu { margin: 1px 0 4px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .finding-edu { color: #f5c164; } }
+:root[data-theme="dark"] .finding-edu { color: #f5c164; }
+
+/* Protection counters: current findings (live with the switches) and the running session total. */
+.session-now { margin: 4px 0 2px; color: var(--ps-accent); font-weight: 500; }
+.session-total { margin: 0 0 12px; padding: 6px 10px; border-radius: 8px; background: var(--ps-accent-soft); color: var(--ps-accent); font-weight: 500; }

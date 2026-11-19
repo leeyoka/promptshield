@@ -9,7 +9,7 @@
 //   RUNTIME- Google Fonts: network first, cached copy when offline.
 'use strict';
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = 'promptshield-shell-' + VERSION;
 const OCR = 'promptshield-ocr-' + VERSION;
 const RUNTIME = 'promptshield-runtime-' + VERSION;
@@ -18,6 +18,7 @@ const KEEP = [SHELL, OCR, RUNTIME];
 const PRECACHE = [
   './',
   'index.html',
+  'energy.html',
   'manifest.json',
   'js/constants.js',
   'js/detectors.js',

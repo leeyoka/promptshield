@@ -74,6 +74,8 @@
     .brand { display: flex; align-items: center; gap: 9px; font: 600 16px/1 var(--sans); text-decoration: none; letter-spacing: -0.01em; }
     .brand svg { width: 26px; height: 26px; color: var(--accent); flex: none; }
     .nav-right { display: flex; align-items: center; gap: 14px; }
+    .nav-link { font: 500 14px/1 var(--sans); color: var(--fg-2); text-decoration: none; padding: 6px 2px; }
+    .nav-link:hover { color: var(--fg); }
     .lang {
       display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 4px;
       font: 500 13px/1 var(--sans); color: var(--fg-3); cursor: pointer;
@@ -314,6 +316,7 @@
         <span data-i18n="nav_product">PromptShield</span>
       </a>
       <div class="nav-right">
+        <a class="nav-link" href="energy.html" data-i18n="nav_energy">Energi</a>
         <button type="button" class="lang" id="lang-toggle" aria-label="Ganti bahasa / Switch language">
           <span data-lang="id">ID</span><span class="sep" aria-hidden="true">|</span><span data-lang="en">EN</span>
         </button>

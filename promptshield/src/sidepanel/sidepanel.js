@@ -142,6 +142,72 @@
     if (kind) el.dataset.kind = kind; else delete el.dataset.kind;
   }
 
+  // ---------------- Education notes (why each type is dangerous) ----------------
+  // Side panel only; the ChatGPT / WhatsApp popup stays compact. CARD is the detector's key for
+  // credit/debit card numbers. KK has no text detector yet (it is recognised as a document type).
+  const EDU = {
+    id: {
+      NIK: 'NIK bisa digunakan untuk membuka pinjaman atas nama kamu.',
+      NPWP: 'NPWP bisa dipakai untuk urusan pajak atas nama kamu.',
+      KK: 'Nomor KK mengungkap seluruh anggota keluargamu.',
+      PHONE: 'Nomor HP cukup untuk SIM swap dan penipuan OTP.',
+      EMAIL: 'Email bisa digunakan untuk mengambil alih akun.',
+      CARD: 'Nomor kartu + nama cukup untuk transaksi online tanpa fisik kartu.',
+      BANK_ACCOUNT: 'Nomor rekening + nama cukup untuk transfer fraud.',
+      PASSPORT: 'Nomor paspor membuka akses ke layanan imigrasi atas namamu.',
+      FLIGHT_NUMBER: 'Data penerbangan bisa digunakan untuk mengklaim bagasimu.',
+      BOOKING_CODE: 'Kode booking bisa dipakai untuk check-in atau mengubah penerbangan.',
+      NAME: 'Nama lengkap dikombinasikan data lain mempermudah identity theft.'
+    },
+    en: {
+      NIK: 'A NIK can be used to take out loans in your name.',
+      NPWP: 'An NPWP can be used for tax matters in your name.',
+      KK: 'A KK number reveals every member of your family.',
+      PHONE: 'A phone number is enough for SIM swaps and OTP scams.',
+      EMAIL: 'An email address can be used to take over your accounts.',
+      CARD: 'Card number + name is enough for online payments without the physical card.',
+      BANK_ACCOUNT: 'Account number + name is enough for transfer fraud.',
+      PASSPORT: 'A passport number opens immigration services in your name.',
+      FLIGHT_NUMBER: 'Flight details can be used to claim your baggage.',
+      BOOKING_CODE: 'A booking code can be used to check in or change your flight.',
+      NAME: 'A full name combined with other data makes identity theft easier.'
+    }
+  };
+  const eduNote = (type) => (EDU[lang] || EDU.id)[type] || '';
+
+  // ---------------- Session counters ----------------
+  // Kept in memory only: they reset when the panel is closed and reopened.
+  const SESSION_STR = {
+    id: {
+      now: (x, y) => `Sesi ini: ${x} data dilindungi · ${y} diizinkan`,
+      total: (x, y) => `Total sesi ini: ${x} temuan dilindungi dari ${y} dokumen dipindai`
+    },
+    en: {
+      now: (x, y) => `This session: ${x} protected · ${y} allowed`,
+      total: (x, y) => `Session total: ${x} finding${x === 1 ? '' : 's'} protected across ${y} document${y === 1 ? '' : 's'} scanned`
+    }
+  };
+  const session = { protected: 0, docs: 0 };
+  const countedTexts = new Set();        // a copied text counts once, however often it is copied
+  function addToSession(protectedN) {
+    session.docs += 1;
+    session.protected += Math.max(0, protectedN | 0);
+    renderSessionTotal();
+  }
+  function renderSessionTotal() {
+    const el = $('session-total');
+    if (!el) return;
+    el.hidden = session.docs === 0;
+    el.textContent = (SESSION_STR[lang] || SESSION_STR.id).total(session.protected, session.docs);
+  }
+  /** "This session: X protected · Y allowed" for the current findings, updated on every toggle. */
+  function renderSessionNow() {
+    const el = $('session-now');
+    if (!el) return;
+    const on = items.filter((i) => i.approved).length;
+    el.textContent = (SESSION_STR[lang] || SESSION_STR.id).now(on, items.length - on);
+  }
+
   // ---------------- Scan ----------------
   function scan() {
     const text = input.value;
@@ -177,6 +243,7 @@
             <span class="finding-hint"></span>
           </span>
           <span class="finding-val"></span>
+          ${eduNote(f.type) ? `<span class="finding-edu">${esc(eduNote(f.type))}</span>` : ''}
         </div>
         <label class="toggle-switch">
           <input type="checkbox" class="finding-toggle" role="switch" data-id="${f.id}">
@@ -184,6 +251,8 @@
         </label>
       </li>`).join('');
     list.querySelectorAll('.finding-row').forEach(paintRow);
+    renderSessionNow();
+    renderSessionTotal();
     list.querySelectorAll('.finding-toggle').forEach((sw) => sw.addEventListener('change', () => {
       const it = items.find((i) => i.id === Number(sw.dataset.id));
       if (!it) return;
@@ -192,6 +261,7 @@
       // place so keyboard focus stays on the switch.
       for (const other of items) if (keyOf(other) === keyOf(it)) other.approved = sw.checked;
       list.querySelectorAll('.finding-row').forEach(paintRow);
+      renderSessionNow();
       renderPreview();
       setStatus(copyStatus, '');
     }));
@@ -299,6 +369,7 @@
       if (!items.length) {
         await writeClipboard(input.value);
         setStatus(copyStatus, S.copiedNone, 'ok');
+        if (!countedTexts.has(input.value)) { countedTexts.add(input.value); addToSession(0); }
         recordPotential(input.value);
         return;
       }
@@ -310,6 +381,8 @@
       await writeClipboard(r.masked);
       const allowedN = items.length - items.filter((i) => i.approved).length;
       setStatus(copyStatus, S.copiedSummary(r.count, allowedN), 'ok');
+      const sessionKey = input.value + '\u0000' + r.sig;
+      if (!countedTexts.has(sessionKey)) { countedTexts.add(sessionKey); addToSession(r.count); }
       recordPotential(input.value);
       if (r.count && lastRecordedSig !== r.sig) {
         lastRecordedSig = r.sig;
@@ -842,12 +915,12 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
         onPage: (p, n) => { if (seq === scanSeq) imgScanning.textContent = ss.pdfScanning(p, n); }
       });
     } catch (_) {
-      if (seq !== scanSeq) return;
+      if (seq !== scanSeq) return null;
       imgScanning.hidden = true;
       showResult('err', ss.pdfErr, '');
-      return;
+      return null;
     }
-    if (seq !== scanSeq) return;
+    if (seq !== scanSeq) return null;
     imgScanning.hidden = true;
 
     if (!r.findings.length) {
@@ -862,6 +935,12 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
         const li = document.createElement('li');
         const src = f.sources.map((x) => (x === 'ocr' ? ss.srcOcr : ss.srcText)).join(' + ');
         li.textContent = `${f.label}: ${psMasker.partialValue(f.value)} (${src})`;
+        if (eduNote(f.type)) {
+          const edu = document.createElement('span');
+          edu.className = 'finding-edu';
+          edu.textContent = eduNote(f.type);
+          li.appendChild(edu);
+        }
         ul.appendChild(li);
       }
       imgResult.appendChild(ul);
@@ -886,11 +965,20 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
       note.textContent = ss.pdfOcrLimit(psPdfScan.MAX_OCR_PAGES);
       imgResult.appendChild(note);
     }
+    return r;
   }
 
-  function handleFile(file) {
+  async function handleFile(file) {
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
-    return isPdf ? handlePdfFile(file) : handleImageFile(file);
+    if (isPdf) {
+      const r = await handlePdfFile(file);
+      if (r) addToSession(r.findings.length);          // the safe .txt masks every finding
+      return r;
+    }
+    const r = await handleImageFile(file);
+    if (r && r.status === 'pii') addToSession(Math.max(1, (r.findings || []).length));   // the safe copy pixelates the photo
+    else if (r && (r.status === 'clean' || r.status === 'notext')) addToSession(0);
+    return r;
   }
 
   // Apply scanner i18n once languages are loaded.

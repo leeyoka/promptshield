@@ -19,6 +19,7 @@
   </header>
 
   <main>
+    <p class="session-total small tnum" id="session-total" hidden aria-live="polite"></p>
     <!-- 1. Mask before sharing -->
     <section aria-labelledby="h-input">
       <div class="step-head">
@@ -34,6 +35,7 @@
       </div>
 
       <div id="detect" hidden>
+        <p class="session-now small tnum" id="session-now" aria-live="polite"></p>
         <div class="list-head"><span data-i18n="detected"></span> <span class="tnum" id="det-count">0</span></div>
         <ul class="list" id="list"></ul>
       </div>
