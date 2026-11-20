@@ -78,6 +78,10 @@
   // the adapter below, which only finds a composer where its selectors match (ChatGPT).
   const SITE = /(^|\.)web\.whatsapp\.com$/.test(location.hostname) ? 'whatsapp'
     : /(^|\.)gemini\.google\.com$/.test(location.hostname) ? 'gemini' : 'chatgpt';
+  // WhatsApp Web is a chat between people: there are no AI replies to restore and no model to
+  // right-size. Features meant for AI chats stay off there, so nothing writes into WhatsApp's own
+  // message DOM (its app manages that DOM and can crash when something else edits it).
+  const AI_SITE = SITE !== 'whatsapp';
 
   // ==========================================================================
   // ChatGPT adapter: the ONLY place that knows ChatGPT's DOM.
@@ -217,6 +221,62 @@
         const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
         return /^(send|kirim)$/.test(aria);
       },
+      /** WhatsApp's send control can be a <button> or a role="button" element. */
+      buttonOf(target) {
+        return target && target.closest ? target.closest('button, [role="button"]') : null;
+      },
+      /** The send button sits in the chat footer and only exists while the box holds text. */
+      findSendButton() {
+        const c = document.querySelector('footer div[contenteditable="true"]');
+        const footer = (c && c.closest('footer')) || document.querySelector('footer');
+        if (!footer) return null;
+        for (const sel of ['button[data-testid="send"]', '[data-testid="send"]', 'button[aria-label="Send" i]',
+          'button[aria-label="Kirim" i]', '[role="button"][aria-label="Send" i]', '[role="button"][aria-label="Kirim" i]',
+          '[data-icon="send"]', '[data-icon="wds-ic-send-filled"]']) {
+          const hit = footer.querySelector(sel);
+          const btn = hit && (hit.closest('button, [role="button"]') || hit);
+          if (btn && isVisible(btn)) { selfCheck('send', sel); return btn; }
+        }
+        return null;
+      },
+      /** innerText without the zero-width characters WhatsApp's editor (Lexical) inserts. */
+      getText(el) {
+        if (!el) return '';
+        return (el.innerText || el.textContent || '').replace(/[​-‍﻿]/g, '');
+      },
+      // Lexical picks up a new selection on 'selectionchange', which fires a moment later, so text
+      // written right after "select all" landed next to the old text instead of replacing it (and the
+      // read-back check then refused to send). Select, wait, then type over the selection. No synthetic
+      // paste here: WhatsApp handles paste asynchronously and could insert the text twice.
+      writeStrategies: ['selectWaitInsert', 'selectWaitInsert', 'deleteThenInsert'],
+      /**
+       * Press send the way a person does. WhatsApp ignores a bare element.click() (the masked text
+       * stayed in the box), so fire the full pointer/mouse sequence on the button; if the box still
+       * holds the text after that, press Enter in the box (WhatsApp sends on Enter). Each dispatch
+       * goes through `unguarded` so our own send guard lets it pass.
+       */
+      async pressSend(btn, unguarded) {
+        const box = () => document.querySelector('footer div[contenteditable="true"]');
+        const opts = (type) => ({ bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+          buttons: /down$/.test(type) ? 1 : 0, pointerId: 1, pointerType: 'mouse', isPrimary: true });
+        if (btn && btn.isConnected) {
+          unguarded(() => {
+            btn.dispatchEvent(new PointerEvent('pointerdown', opts('pointerdown')));
+            btn.dispatchEvent(new MouseEvent('mousedown', opts('mousedown')));
+            btn.dispatchEvent(new PointerEvent('pointerup', opts('pointerup')));
+            btn.dispatchEvent(new MouseEvent('mouseup', opts('mouseup')));
+            btn.click();
+          });
+          // Generous wait: Enter after a press that did send (slowly) would send the message twice.
+          if (await waitFor(() => normText(this.getText(box())) === '', 1500)) return;
+        }
+        const c = box();
+        if (!c || normText(this.getText(c)) === '') return;
+        c.focus();
+        unguarded(() => c.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true
+        })));
+      },
       messageArea() {
         return document.querySelector('#main') || document.body;
       }
@@ -246,6 +306,12 @@
       return;
     }
     selectAllIn(el);
+    if (strategy === 'selectWaitInsert') {
+      // Let the editor take the selection over (selectionchange is async), select again, type over it.
+      return new Promise((resolve) => setTimeout(() => {
+        try { selectAllIn(el); document.execCommand('insertText', false, text); } finally { resolve(); }
+      }, 80));
+    }
     if (strategy === 'paste') {
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
@@ -277,12 +343,13 @@
   async function writeAndVerify(text) {
     const first = adapter.findComposer();
     if (!first) { dlog('write: composer not found'); return null; }
-    const strategies = (first.tagName === 'TEXTAREA') ? ['native'] : ['paste', 'insertText', 'deleteThenInsert'];
+    const strategies = adapter.writeStrategies
+      || ((first.tagName === 'TEXTAREA') ? ['native'] : ['paste', 'insertText', 'deleteThenInsert']);
     for (const strategy of strategies) {
       const target = adapter.findComposer();
       if (!target) return null;
       const t0 = performance.now();
-      try { applyWriteStrategy(strategy, target, text); } catch (_) { dlog('write: strategy threw', strategy); }
+      try { await applyWriteStrategy(strategy, target, text); } catch (_) { dlog('write: strategy threw', strategy); }
       const ok = await waitFor(() => normText(adapter.getText(adapter.findComposer())) === normText(text), 500);
       dlog('write strategy', strategy, ok ? 'verified' : 'mismatch', Math.round(performance.now() - t0) + 'ms');
       if (ok) return adapter.findComposer();
@@ -464,7 +531,7 @@
     hideBanner();
     const threshold = settings.confidenceThreshold;
     const items = findings.map((f, i) => ({ ...f, id: i, approved: f.confidence >= threshold }));
-    const advice = settings.rightSize ? psComplexity.score(text) : null;
+    const advice = settings.rightSize && AI_SITE ? psComplexity.score(text) : null;
     const state = { text, items, tokens: null, tokenSource: null, view: 'original', advice };
     sheet = state;
     state.tokenPromise = getTokens(items).then((r) => {
@@ -594,6 +661,13 @@
   // Send paths
   // ==========================================================================
   function clickSendOurselves(btn) {
+    if (adapter.pressSend) {
+      // Site-specific press (WhatsApp Web); every event it fires passes our guard once.
+      return adapter.pressSend(btn, (fire) => {
+        bypassNextSend = true;
+        try { fire(); } finally { bypassNextSend = false; }
+      });
+    }
     bypassNextSend = true;
     try { btn.click(); } finally { bypassNextSend = false; }
   }
@@ -622,13 +696,15 @@
       dlog('masking', { items: approved.length, tokenSource: source });
 
       if (!(await writeAndVerify(masked))) throw new Error('write not verified');
-      if (!(await waitFor(() => adapter.isSendEnabled(adapter.findSendButton()), 1500))) throw new Error('send button not enabled');
+      const sendReady = await waitFor(() => adapter.isSendEnabled(adapter.findSendButton()), 1500);
+      // WhatsApp can also send with Enter (pressSend), so a missing button is not fatal there.
+      if (!sendReady && !adapter.pressSend) throw new Error('send button not enabled');
       if (normText(adapter.getText(adapter.findComposer())) !== normText(masked)) throw new Error('composer changed before send');
 
       if (aiView) setAiView(false); // new reply should show real values again
       for (const f of approved) valueByToken.set(tokens[f.id], f.value);
       rememberSent(masked);
-      clickSendOurselves(adapter.findSendButton());
+      await clickSendOurselves(adapter.findSendButton());
       dlog('masked send released', { items: approved.length });
 
       const accepted = await waitFor(() => normText(adapter.getText(adapter.findComposer())) === '', 4000);
@@ -683,7 +759,7 @@
   }
 
   const sendButtonOf = (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+    const btn = adapter.buttonOf ? adapter.buttonOf(e.target) : (e.target && e.target.closest ? e.target.closest('button') : null);
     return btn && adapter.isSendButton(btn) ? btn : null;
   };
 
@@ -733,7 +809,8 @@
     const once = (type) => (e) => {
       if (handledEvents.has(e) || isOrphaned()) return;
       handledEvents.add(e);
-      guard[type](e);
+      // An error in our check must never break WhatsApp's own handlers for this event.
+      try { guard[type](e); } catch (err) { dlog('whatsapp guard error', err && err.message); }
     };
     const onceGuard = {};
     for (const type of Object.keys(guard)) onceGuard[type] = once(type);
@@ -750,23 +827,29 @@
       for (const type of types) el.addEventListener(type, onceGuard[type], true);
     }
 
+    // WhatsApp mutates its DOM constantly (typing indicators, message list), so the check here is a
+    // plain querySelector (no layout) and runs at most every 250 ms.
     let currentComposer = null;
     function reattachWhatsApp() {
-      const composer = adapter.findComposer();
+      const composer = document.querySelector('footer div[contenteditable="true"]');
       if (composer !== currentComposer) {
         const switched = !!currentComposer && !currentComposer.isConnected;
         currentComposer = composer;
         if (switched && sheet && !busy) { closeSheet(false); dlog('chat switched: review cancelled'); }
         if (composer) dlog('whatsapp composer attached');
       }
+      if (!composer) return;
       attachTo(composer, ['keydown']);
+      // The send button only exists while the box holds text (otherwise it is the voice button).
       attachTo(adapter.findSendButton(), ['pointerdown', 'mousedown', 'click']);
     }
-    let reattachQueued = false;
+    let reattachTimer = null;
     new MutationObserver(() => {
-      if (reattachQueued) return;
-      reattachQueued = true;
-      requestAnimationFrame(() => { reattachQueued = false; reattachWhatsApp(); });
+      if (reattachTimer) return;
+      reattachTimer = setTimeout(() => {
+        reattachTimer = null;
+        try { reattachWhatsApp(); } catch (err) { dlog('whatsapp reattach error', err && err.message); }
+      }, 250);
     }).observe(document.body, { childList: true, subtree: true });
     reattachWhatsApp();
   }
@@ -780,7 +863,7 @@
   // Scanning is automatic on every site (ChatGPT, Gemini, WhatsApp Web): the service worker hands the
   // file to its offscreen document (src/offscreen/), which runs Tesseract OCR and PDF.js on the device.
   // No side panel and no extra click are needed.
-  // Photos: each finding comes back with its boxes; the dialog pixelates only the findings kept ON.
+  // Photos: each finding comes back with its boxes; if any is kept ON, the whole photo is pixelated.
   // PDFs: text extraction AND OCR of every rendered page, findings merged; the safe version is the
   // document text with the findings kept ON replaced by [TYPE_MASKED], uploaded as a .txt file.
   // ==========================================================================
@@ -812,6 +895,14 @@
       errBody: 'PromptShield tidak bisa memeriksa foto ini. Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
       pdfErrTitle: 'PDF tidak bisa dipindai',
       pdfErrBody: 'PromptShield tidak bisa membaca PDF ini (mungkin terkunci, rusak, atau terlalu besar). Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
+      scanningDocx: 'PromptShield sedang memindai dokumen Word…',
+      titleDocx: 'Data sensitif terdeteksi di dokumen Word',
+      docxNote: 'Versi aman dokumen Word dikirim sebagai file teks (.txt) berisi teks dokumen dengan data yang disamarkan, tanpa gambar.',
+      docxScanTitle: 'Memeriksa dokumen Word sebelum dikirim',
+      docxScanBody: 'PromptShield sedang membaca teks dokumen ini dan memindai gambar di dalamnya (OCR) di perangkatmu. Dokumen belum dikirim.',
+      docxErrTitle: 'Dokumen Word tidak bisa dipindai',
+      docxErrBody: 'PromptShield tidak bisa membaca dokumen ini (mungkin terkunci, rusak, atau terlalu besar). Pastikan tidak ada data sensitif di dalamnya sebelum mengirim.',
+      cleanFiles: 'PromptShield: tidak ada data sensitif di file ini.',
       buildFail: 'Versi aman gagal dibuat. Tidak ada yang dikirim.'
     },
     en: {
@@ -841,6 +932,14 @@
       errBody: 'PromptShield could not check this photo. Make sure it holds no sensitive data before sending.',
       pdfErrTitle: 'Could not scan this PDF',
       pdfErrBody: 'PromptShield could not read this PDF (it may be locked, damaged or too large). Make sure it holds no sensitive data before sending.',
+      scanningDocx: 'PromptShield is scanning the Word document…',
+      titleDocx: 'Sensitive data detected in Word document',
+      docxNote: 'The safe version of a Word document is sent as a text file (.txt) holding the document text with the data masked, without images.',
+      docxScanTitle: 'Checking the Word document before sending',
+      docxScanBody: 'PromptShield is reading the text of this document and scanning its images (OCR) on your device. It has not been sent yet.',
+      docxErrTitle: 'Could not scan this Word document',
+      docxErrBody: 'PromptShield could not read this document (it may be locked, damaged or too large). Make sure it holds no sensitive data before sending.',
+      cleanFiles: 'PromptShield: no sensitive data found in this file.',
       buildFail: 'Could not build the safe version. Nothing was sent.'
     }
   };
@@ -850,7 +949,8 @@
   const pendingInputs = new WeakSet();    // inputs whose files are being scanned
   const isImageFile = (f) => !!f && /^image\//.test(f.type || '');
   const isPdfFile = (f) => !!f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
-  const isGuardedFile = (f) => isImageFile(f) || isPdfFile(f);
+  const isDocxFile = (f) => !!f && (f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(f.name || ''));
+  const isGuardedFile = (f) => isImageFile(f) || isPdfFile(f) || isDocxFile(f);
 
   // Three ways a file reaches the chat: the file picker (<input type="file">), Ctrl+V paste, and
   // drag & drop. Each is held back the same way and handed to guardUpload() as a "source":
@@ -897,7 +997,12 @@
   }
   dlog('upload guard active on', SITE, '(images + PDF; file picker, paste, drag & drop). File inputs on page:', hookFileInputs());
   // The site may (re)create its file input when the upload / attach menu opens: re-scan after clicks.
-  document.addEventListener('click', () => { setTimeout(hookFileInputs, 100); setTimeout(hookFileInputs, 500); }, true);
+  // On WhatsApp Web the inputs are ordinary elements (caught by the observer and the window
+  // listener), so the rescan skips the full-page shadow-root walk on every click.
+  const rescanFileInputs = SITE === 'whatsapp'
+    ? () => document.querySelectorAll('input[type="file"]').forEach(attachFileHook)
+    : hookFileInputs;
+  document.addEventListener('click', () => { setTimeout(rescanFileInputs, 100); setTimeout(rescanFileInputs, 500); }, true);
   new MutationObserver((muts) => {
     for (const m of muts) for (const n of m.addedNodes) {
       if (n.nodeType !== 1) continue;
@@ -1027,7 +1132,9 @@
   async function scanImage(file) {
     const dataUrl = await readAsDataUrl(file);
     // First OCR loads the model, so allow a long time.
-    return sendScan({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, lang }, 180000);
+    // 60 s covers loading the OCR model plus every pass on a large photo; after that the user gets
+    // "Send without scanning / Cancel" instead of a spinner that never ends.
+    return sendScan({ type: 'SCAN_IMAGE_FOR_PII', dataUrl, mimeType: file.type, fileName: file.name, lang }, 60000);
   }
 
   /**
@@ -1037,6 +1144,15 @@
   async function scanPdf(file) {
     const dataUrl = await readAsDataUrl(file);
     return sendScan({ type: 'SCAN_PDF_FOR_PII', dataUrl, fileName: file.name, lang }, 600000);
+  }
+
+  /**
+   * Scan one Word document (service worker -> offscreen document): document text + OCR of every
+   * embedded picture, merged. Resolves the same shape as scanPdf.
+   */
+  async function scanDocx(file) {
+    const dataUrl = await readAsDataUrl(file);
+    return sendScan({ type: 'SCAN_DOCX_FOR_PII', dataUrl, fileName: file.name, lang }, 600000);
   }
 
   async function scanEach(files, fn) {
@@ -1117,7 +1233,7 @@
 
   // ---------- Per-finding "groups": one flagged file each ----------
 
-  /** Photo: findings with their boxes; the safe version pixelates only the boxes switched ON. */
+  /** Photo: findings with their boxes; if any finding is switched ON the safe version pixelates the whole photo. */
   async function makeImageGroup(file, res) {
     const s = IS();
     let bitmap;
@@ -1149,15 +1265,8 @@
       canvas.height = bitmap.height;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(bitmap, 0, 0);
-      const on = items.filter((i) => i.approved);
-      if (on.some((i) => !i.boxes.length)) {
-        // Something switched ON could not be located: only the whole photo is safe.
-        psImageRedact.pixelateRegion(ctx, 0, 0, canvas.width, canvas.height, psImageRedact.blockSizeFor(canvas.width, canvas.height));
-      } else {
-        for (const it of on) for (const b of it.boxes) {
-          psImageRedact.pixelateRegion(ctx, b.x, b.y, b.w, b.h, psImageRedact.blockSizeForBox(b, canvas.width, canvas.height));
-        }
-      }
+      // Any finding switched ON: the WHOLE photo becomes a mosaic (face, text, MRZ, everything).
+      if (items.some((i) => i.approved)) psImageRedact.pixelateCanvas(canvas, psImageRedact.MOSAIC_BLOCK);
       return canvas;
     }
 
@@ -1171,7 +1280,10 @@
         const k = Math.min(1, 480 / full.width, 260 / full.height);
         pv.width = Math.max(1, Math.round(full.width * k));
         pv.height = Math.max(1, Math.round(full.height * k));
-        pv.getContext('2d').drawImage(full, 0, 0, pv.width, pv.height);
+        const pctx = pv.getContext('2d');
+        // Keep the mosaic blocks crisp when shrinking it for the preview (no soft blur).
+        pctx.imageSmoothingEnabled = !items.some((i) => i.approved);
+        pctx.drawImage(full, 0, 0, pv.width, pv.height);
       },
       async build() {
         if (!items.some((i) => i.approved)) return file;      // everything allowed for this photo
@@ -1189,8 +1301,9 @@
    * occurrence of each finding switched ON replaced by [TYPE_MASKED]. Findings come from both text
    * extraction and OCR; one found only by OCR inside an image on a text page has no occurrence in the
    * text version, so it cannot leak through it either.
+   * Word documents (kind 'docx') work the same way: document text, findings from text + picture OCR.
    */
-  function makePdfGroup(file, res) {
+  function makePdfGroup(file, res, kind = 'pdf') {
     const s = IS();
     const text = String(res.text || '');
     const items = (res.findings || []).map((f, i) => ({
@@ -1206,7 +1319,7 @@
     const safeText = () => psPdfScan.maskText(text, items, (it) => it.approved);
     const PREVIEW_MAX = 1200;
     return {
-      kind: 'pdf', file, items,
+      kind, file, items,
       previewHtml: '<pre class="up-text mono"></pre>',
       refresh(el) {
         const pv = el.querySelector('.up-text');
@@ -1218,7 +1331,7 @@
           (t.length > PREVIEW_MAX ? `\n<span class="muted">${esc(s.pdfMore(t.length - PREVIEW_MAX))}</span>` : '');
       },
       async build() {
-        if (!items.some((i) => i.approved)) return file;      // everything allowed: the PDF itself
+        if (!items.some((i) => i.approved)) return file;      // everything allowed: the original file itself
         return new File([safeText()], 'safe_' + baseName(file.name, 'document') + '.txt', { type: 'text/plain' });
       },
       dispose() {}
@@ -1233,7 +1346,7 @@
   function findingsDialog(groups) {
     const s = IS();
     const kinds = new Set(groups.map((g) => g.kind));
-    const title = kinds.size > 1 ? s.titleFile : kinds.has('pdf') ? s.titlePdf : s.title;
+    const title = kinds.size > 1 ? s.titleFile : kinds.has('pdf') ? s.titlePdf : kinds.has('docx') ? s.titleDocx : s.title;
     const total = groups.reduce((n, g) => n + g.items.length, 0);
     return new Promise((resolve) => {
       closeLayer();
@@ -1252,7 +1365,7 @@
               aria-label="${esc(f.label)} ${esc(f.display)}">
           </li>`).join('');
         return `<section class="up-group" data-g="${gi}">
-            <div class="up-file"><span class="up-kind">${g.kind === 'pdf' ? 'PDF' : 'IMG'}</span><span class="up-name">${esc(g.file.name || '')}</span></div>
+            <div class="up-file"><span class="up-kind">${g.kind === 'pdf' ? 'PDF' : g.kind === 'docx' ? 'DOCX' : 'IMG'}</span><span class="up-name">${esc(g.file.name || '')}</span></div>
             ${g.previewHtml}
             <div class="list-head">${esc(T.detected)} <span class="num">${g.items.length}</span></div>
             <ul class="list">${rows}</ul>
@@ -1264,6 +1377,7 @@
             <div><h2 id="ps-up-title">${esc(title)}</h2><p id="ps-up-sub">${esc(s.body)}</p></div></div>
           ${sections}
           ${kinds.has('pdf') ? `<p class="muted small img-note">${esc(s.pdfNote)}</p>` : ''}
+          ${kinds.has('docx') ? `<p class="muted small img-note">${esc(s.docxNote)}</p>` : ''}
           <p class="count up-count" aria-live="polite"></p>
           <p class="up-none" role="status" hidden>${esc(s.noneOn)}</p>
           <div class="img-actions">
@@ -1328,8 +1442,16 @@
     const all = src.files;
     const images = all.filter(isImageFile);   // every image is scanned: no filename / doc-type filter
     const pdfs = all.filter((f) => !isImageFile(f) && isPdfFile(f));
+    const docxs = all.filter((f) => !isImageFile(f) && !isPdfFile(f) && isDocxFile(f));
     const s = IS();
     const flagged = [];   // [{file, kind, res}]
+
+    if (docxs.length) {
+      const outcome = await scanWithPrompt(() => scanEach(docxs, scanDocx), { title: s.docxScanTitle, sub: s.docxScanBody, spinner: s.scanningDocx });
+      if (outcome.user) { if (outcome.user === 'skip') src.release(); else src.cancel(); return; }
+      if (outcome.error) { dlog('docx scan failed', outcome.error.message); await errorChoice(src, s.docxErrTitle, s.docxErrBody); return; }
+      for (const r of outcome.results) if (r.res.hasPII) flagged.push({ ...r, kind: 'docx' });
+    }
 
     if (pdfs.length) {
       const outcome = await scanWithPrompt(() => scanEach(pdfs, scanPdf), { title: s.pdfScanTitle, sub: s.pdfScanBody, spinner: s.scanningPdf });
@@ -1344,13 +1466,14 @@
     }
 
     if (!flagged.length) {
-      src.release();          // clean: the upload proceeds silently
+      src.release();          // clean: the upload proceeds
+      toast(s.cleanFiles, 'success', { duration: 3500 });
       return;
     }
 
     let groups;
     try {
-      groups = await Promise.all(flagged.map((r) => (r.kind === 'pdf' ? makePdfGroup(r.file, r.res) : makeImageGroup(r.file, r.res))));
+      groups = await Promise.all(flagged.map((r) => (r.kind === 'pdf' || r.kind === 'docx' ? makePdfGroup(r.file, r.res, r.kind) : makeImageGroup(r.file, r.res))));
     } catch (e) {
       dlog('could not prepare review', e && e.message);
       await errorChoice(src, s.errTitle, s.errBody);
@@ -1455,7 +1578,7 @@
   // suggestions the user accepted), so neither number claims a saving that did not happen.
   let lastPotential = { text: '', at: 0 };
   function recordPotential(text) {
-    if (!settings.rightSize || !text || text.trim().length < 20) return;
+    if (!AI_SITE || !settings.rightSize || !text || text.trim().length < 20) return;
     const now = Date.now();
     if (text === lastPotential.text && now - lastPotential.at < 5000) return; // keydown + submit = one send
     lastPotential = { text, at: now };
@@ -1511,12 +1634,14 @@
     bannerKey = key;
   }
 
-  document.addEventListener('input', (e) => {
-    if (!adapter.isInComposer(e.target)) return;
-    clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(updateBanner, 700);
-  }, true);
-  window.addEventListener('resize', positionBanner);
+  if (AI_SITE) {
+    document.addEventListener('input', (e) => {
+      if (!adapter.isInComposer(e.target)) return;
+      clearTimeout(bannerTimer);
+      bannerTimer = setTimeout(updateBanner, 700);
+    }, true);
+    window.addEventListener('resize', positionBanner);
+  }
 
   // ==========================================================================
   // Restorer: real values back on screen (text nodes only; never attributes/links)
@@ -1686,23 +1811,26 @@
     while ((n = walker.nextNode())) restoreNode(n);
   }
 
-  new MutationObserver((mutations) => {
-    if (valueByToken.size === 0) return;
-    for (const m of mutations) {
-      if (m.type === 'characterData') restoreNode(m.target);
-      else for (const a of m.addedNodes) {
-        if (a.nodeType === Node.TEXT_NODE) restoreNode(a);
-        else if (a.nodeType === Node.ELEMENT_NODE) restoreTree(a);
+  // On-screen restore is for AI replies only: on WhatsApp Web it never touches the message list.
+  if (AI_SITE) {
+    new MutationObserver((mutations) => {
+      if (valueByToken.size === 0) return;
+      for (const m of mutations) {
+        if (m.type === 'characterData') restoreNode(m.target);
+        else for (const a of m.addedNodes) {
+          if (a.nodeType === Node.TEXT_NODE) restoreNode(a);
+          else if (a.nodeType === Node.ELEMENT_NODE) restoreTree(a);
+        }
       }
-    }
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
 
-  // Load tokens from the vault so replies restore after a page reload too.
-  sendBG({ action: PS_ACTIONS.GET_MAP }).then((res) => {
-    for (const [tok, val] of Object.entries(res.map || {})) valueByToken.set(tok, val);
-    dlog('vault map loaded', { tokens: valueByToken.size });
-    restoreTree(adapter.messageArea());
-  }).catch((e) => dlog('vault map unavailable:', e.message));
+    // Load tokens from the vault so replies restore after a page reload too.
+    sendBG({ action: PS_ACTIONS.GET_MAP }).then((res) => {
+      for (const [tok, val] of Object.entries(res.map || {})) valueByToken.set(tok, val);
+      dlog('vault map loaded', { tokens: valueByToken.size });
+      restoreTree(adapter.messageArea());
+    }).catch((e) => dlog('vault map unavailable:', e.message));
+  }
 
   // ==========================================================================
   // Styles (component layer on top of ui-tokens.js)

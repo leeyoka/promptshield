@@ -10,7 +10,10 @@
 'use strict';
 
 const VERSION = 'v2';
-const SHELL = 'promptshield-shell-' + VERSION;
+// Bump SHELL_REV when a precached page changes (e.g. energy.html), so installed copies refetch it;
+// the OCR cache keeps its name and its large model files.
+const SHELL_REV = '3';
+const SHELL = 'promptshield-shell-' + VERSION + '.' + SHELL_REV;
 const OCR = 'promptshield-ocr-' + VERSION;
 const RUNTIME = 'promptshield-runtime-' + VERSION;
 const KEEP = [SHELL, OCR, RUNTIME];

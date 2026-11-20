@@ -352,6 +352,7 @@ mark.rest { background: var(--ps-mark); border-bottom: 1.5px dotted var(--ps-acc
 .img-redact-safe { margin: 8px 0 0; font-size: var(--ps-fs-12); font-weight: 500; color: var(--ps-ok); }
 #redactedPreview {
   display: block;
+  image-rendering: pixelated;   /* keep mosaic blocks crisp when scaled */
   max-width: 100%;
   height: auto;
   border-radius: 8px;

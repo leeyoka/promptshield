@@ -29,9 +29,12 @@
   function looksLikeSend(e) {
     if (e.type === 'keydown') return e.key === 'Enter' && !e.shiftKey && !e.isComposing;
     if (e.type === 'submit') return true;
-    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+    // WhatsApp Web's send control can be a role="button" element marked only by its send icon.
+    const wa = /(^|\.)web\.whatsapp\.com$/.test(location.hostname);
+    const btn = e.target && e.target.closest ? e.target.closest(wa ? 'button, [role="button"]' : 'button') : null;
     if (!btn) return false;
     const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+    if (wa && btn.querySelector('[data-icon="send"], [data-icon="wds-ic-send-filled"]')) return true;
     return btn.id === 'composer-submit-button' || /send/.test(btn.getAttribute('data-testid') || '') || /^(send|kirim)/.test(aria);
   }
 

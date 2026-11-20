@@ -1,9 +1,10 @@
-// PromptShield PDF scan: three passes, all of them always run, merged.
-//   1. Text extraction with the bundled PDF.js (getTextContent): PDFs with embedded text, e.g. forms.
-//   2. OCR: each page is rendered to a canvas and read with Tesseract (psOcr): scanned PDFs, e.g. a
-//      photographed KTP saved as PDF.
-//   3. Image OCR: on pages with a text layer, every embedded picture (e.g. a passport photo inside a
-//      form) is OCR'd on its own with the photo passes, so page text cannot mask it.
+// PromptShield PDF scan, per page (first MAX_OCR_PAGES pages get OCR), merged:
+//   1. Text extraction with the bundled PDF.js (getTextContent): always.
+//   2. Picture OCR: on pages with a text layer, every embedded picture (e.g. a passport photo inside
+//      a form) is OCR'd on its own with the photo passes, whatever the text contained.
+//   3. Page OCR: the page rendered at 2x and read with Tesseract, for scanned pages (no text layer),
+//      or text pages with a picture that could not be read on its own. On ordinary text pages it is
+//      skipped: it would only re-read the text layer and is by far the slowest step.
 // Findings from all passes are merged and de-duplicated by type + value (same canonical form the
 // masker uses, so "3273 0551 0299 0004" and "3273055102990004" are one finding).
 // Everything stays on the device; no network.
@@ -17,11 +18,15 @@
 'use strict';
 
 var psPdfScan = (() => {
+  // DEBUG-gated log for OCR skipped on one image/page (error message only, never content).
+  const DEBUG = false;
+  const ocrSkipped = (err) => { if (DEBUG) console.debug('[PromptShield] OCR skipped:', (err && err.message) || err); };
   const MAX_BYTES = 30 * 1024 * 1024;   // larger PDFs are refused (fail closed in the page)
   const MAX_PAGES = 300;                // text extraction
   const MAX_OCR_PAGES = 20;             // OCR is slow (seconds per page); later pages: text only
-  const OCR_SCALE = 3;                  // page render scale for OCR: small print (e.g. a passport photo) stays sharp
-  const OCR_PAGE_MAX_PX = 4200;         // cap for oversized pages (A4 at 3x = 2526 x 3572 px)
+  const OCR_SCALE = 2;                  // page render scale for full-page OCR (scanned pages); A4 = 1684 x 2382 px
+  const OCR_PAGE_MAX_PX = 3000;         // cap for oversized pages
+  const OBJ_WAIT_MS = 3000;             // how long to wait for PDF.js to finish decoding one embedded image
   const MIN_TEXT_CHARS = 20;            // fewer letters/digits than this: treat the page as scanned
   const MAX_OCR_IMAGES = 12;            // embedded images OCR'd on their own, per document
   const MIN_IMAGE_SIDE = 80;            // smaller embedded images (icons, logos, lines) are skipped
@@ -69,15 +74,31 @@ var psPdfScan = (() => {
     return canvas;
   }
 
+  /** A decoded PDF.js image object; waits (briefly) when PDF.js is still decoding it. null if never ready. */
+  function pageObject(page, id) {
+    const store = id.startsWith('g_') ? page.commonObjs : page.objs;
+    try { return Promise.resolve(store.get(id)); } catch (_) { /* not resolved yet: wait for it */ }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), OBJ_WAIT_MS);
+      try { store.get(id, (obj) => { clearTimeout(timer); resolve(obj || null); }); } catch (_) { clearTimeout(timer); resolve(null); }
+    });
+  }
+
+  const bigEnough = (img) => !!img && Math.min(img.width, img.height) >= MIN_IMAGE_SIDE && Math.max(img.width, img.height) >= MIN_IMAGE_LONG;
+
   /**
    * The embedded raster images a page draws (decoded by PDF.js), big enough to hold readable text.
-   * Call after page.render(): the image objects are resolved by then.
+   * undecoded counts large pictures we could not get on their own (image masks, objects that never
+   * resolved): the caller then OCRs the whole rendered page instead, so nothing goes unread.
+   * @returns {Promise<{images:Array, undecoded:number}>}
    */
   async function embeddedImages(page) {
     const OPS = lib().OPS;
     const ops = await page.getOperatorList();
-    const out = [];
+    const images = [];
+    let undecoded = 0;
     const seen = new Set();
+    const MASK_OPS = new Set([OPS.paintImageMaskXObject, OPS.paintImageMaskXObjectRepeat, OPS.paintImageMaskXObjectGroup]);
     for (let i = 0; i < ops.fnArray.length; i++) {
       const fn = ops.fnArray[i];
       const args = ops.argsArray[i] || [];
@@ -86,15 +107,20 @@ var psPdfScan = (() => {
         const id = args[0];
         if (typeof id !== 'string' || seen.has(id)) continue;
         seen.add(id);
-        try { img = (id.startsWith('g_') ? page.commonObjs : page.objs).get(id); } catch (_) { img = null; }
+        img = await pageObject(page, id);
+        if (!img) { undecoded++; continue; }
       } else if (fn === OPS.paintInlineImageXObject) {
         img = args[0];
+      } else if (MASK_OPS.has(fn)) {
+        // 1-bit stencil (often scanned text): not readable on its own, so read the whole page.
+        const m = Array.isArray(args[0]) ? args[0][0] : args[0];
+        if (bigEnough(m)) undecoded++;
+        continue;
       }
-      if (!img || !img.width || !img.height) continue;
-      if (Math.min(img.width, img.height) < MIN_IMAGE_SIDE || Math.max(img.width, img.height) < MIN_IMAGE_LONG) continue;
-      out.push(img);
+      if (!img || !img.width || !img.height || !bigEnough(img)) continue;
+      images.push(img);
     }
-    return out;
+    return { images, undecoded };
   }
 
   /** Draw a PDF.js image object onto a white canvas (null when its pixel format is unknown). */
@@ -113,10 +139,9 @@ var psPdfScan = (() => {
   }
 
   /**
-   * Read every page: embedded text, and (for the first MAX_OCR_PAGES pages, when ocr is on) OCR of
-   * the rendered page. On pages that also have a text layer, each embedded image is OCR'd on its own
-   * with the full photo passes (rotations, pattern removal): page OCR there mostly re-reads the text
-   * layer and stops at its first finding, so a small ID photo inside the page would be missed.
+   * Read every page: embedded text; then, for the first MAX_OCR_PAGES pages when ocr is on, OCR of
+   * each embedded picture on text pages, and of the whole rendered page on scanned pages (or when a
+   * picture could not be read on its own). See the header for why.
    * @returns {Promise<{pages:Array<{text, ocrText:string|null, ocrFindings, imageTexts, imageFindings}>, numPages, truncated, ocrPages, imagesScanned}>}
    */
   async function readPages(bytes, { ocr = true, onPage } = {}) {
@@ -143,25 +168,47 @@ var psPdfScan = (() => {
         let ocrText = null, ocrFindings = [];
         const imageTexts = [], imageFindings = [];
         if (canOcr && p <= MAX_OCR_PAGES) {
-          const canvas = await renderPage(page);
-          const r = await psOcr.ocrImage(canvas, { page: true });
-          // fixDigits undoes O->0, I->1, … inside number-like tokens, as for photos.
-          ocrText = psDocScan.fixDigits(r.bestText || '').trim();
-          ocrFindings = (r.analysis && r.analysis.findings) || [];
-          canvas.width = canvas.height = 0;          // free the bitmap now, not at GC time
-          ocrPages++;
+          const hasText = alnum(text) >= MIN_TEXT_CHARS;
+          let needPageOcr = !hasText;                  // scanned page: the page itself is the picture
 
-          // Text page with pictures in it: OCR each picture as a photo, whatever the text pass found.
-          if (alnum(text) >= MIN_TEXT_CHARS && imagesScanned < MAX_OCR_IMAGES) {
-            for (const img of await embeddedImages(page)) {
-              if (imagesScanned >= MAX_OCR_IMAGES) break;
+          // Text page: its words come from the text layer. OCR each picture on it as a photo (e.g. a
+          // passport inside a form), whatever the text contained. Re-reading the whole rendered page
+          // would mostly repeat the text layer and is the slowest step, so it only runs when a
+          // picture could not be read on its own.
+          if (hasText) {
+            const pics = await embeddedImages(page);
+            if (pics.undecoded) needPageOcr = true;
+            for (const img of pics.images) {
+              if (imagesScanned >= MAX_OCR_IMAGES) { needPageOcr = true; break; }
               const ic = imageToCanvas(img);
-              if (!ic) continue;
-              const ir = await psOcr.ocrImage(ic);
-              imageTexts.push(psDocScan.fixDigits(ir.allText || '').trim());
-              for (const f of (ir.analysis && ir.analysis.findings) || []) imageFindings.push(f);
-              ic.width = ic.height = 0;
-              imagesScanned++;
+              if (!ic) { needPageOcr = true; continue; }
+              try {
+                const ir = await psOcr.ocrImage(ic);
+                imageTexts.push(psDocScan.fixDigits(ir.allText || '').trim());
+                for (const f of (ir.analysis && ir.analysis.findings) || []) imageFindings.push(f);
+                imagesScanned++;
+              } catch (err) {
+                ocrSkipped(err);
+                needPageOcr = true;                  // fall back to reading the whole page
+              } finally {
+                ic.width = ic.height = 0;            // free the bitmap now, not at GC time
+              }
+            }
+          }
+
+          if (needPageOcr) {
+            let canvas = null;
+            try {
+              canvas = await renderPage(page);
+              const r = await psOcr.ocrImage(canvas, { page: true });
+              // fixDigits undoes O->0, I->1, … inside number-like tokens, as for photos.
+              ocrText = psDocScan.fixDigits(r.bestText || '').trim();
+              ocrFindings = (r.analysis && r.analysis.findings) || [];
+              ocrPages++;
+            } catch (err) {
+              ocrSkipped(err);
+            } finally {
+              if (canvas) canvas.width = canvas.height = 0;
             }
           }
         }
