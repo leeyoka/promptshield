@@ -170,8 +170,12 @@ function detectPassport(text, out) {
     const digits  = v.replace(/\D/g, '').length;
     if (!((letters === 1 && digits === 7) || (letters === 2 && digits === 6))) continue;
     const cue = nearestCue(before(text, m.index), ALL_CUES);
-    const conf = cue === 'passport' ? 0.95 : 0.65;
-    const reason = cue === 'passport' ? 'passport-format+context' : 'passport-format';
+    let conf = 0.65, reason = 'passport-format';
+    if (cue === 'passport') { conf = 0.95; reason = 'passport-format+context'; }
+    // Printed documents put the label above the value ("No. Paspor/Passport No." then "X1989435"),
+    // and a passport repeats its number at the start of MRZ line 2.
+    else if (!cue && CTX.passport.test(previousLine(text, m.index))) { conf = 0.95; reason = 'passport-format+label-above'; }
+    else if (!cue && mrzDocNumbers(text).has(v)) { conf = 0.95; reason = 'passport-format+mrz'; }
     out.push(mk(PS_TYPES.PASSPORT, m, conf, reason));
   }
 }
@@ -330,11 +334,132 @@ function detectBoardingDate(text, out) {
 }
 
 // ---------------------------------------------------------------------------
+// Passport machine-readable zone (ICAO 9303, TD3: two lines of 44 characters) and dates of birth.
+// OCR reads the filler '<' as '<', '«', 'K' or 'C', so the patterns accept that where the structure
+// still makes the match unambiguous. Valid check digits raise confidence.
+// ---------------------------------------------------------------------------
+/** The text of the line before the one holding `start` (lowercase). */
+function previousLine(text, start) {
+  const lineStart = text.lastIndexOf('\n', start - 1);
+  if (lineStart <= 0) return '';
+  const prevStart = text.lastIndexOf('\n', lineStart - 1) + 1;
+  return text.slice(prevStart, lineStart).toLowerCase();
+}
+
+/** ICAO 9303 check digit (weights 7-3-1; '<' = 0, A = 10 … Z = 35); -1 for other characters. */
+function psMrzCheckDigit(s) {
+  const W = [7, 3, 1];
+  let sum = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    let v;
+    if (c === '<') v = 0;
+    else if (c >= '0' && c <= '9') v = c.charCodeAt(0) - 48;
+    else if (c >= 'A' && c <= 'Z') v = c.charCodeAt(0) - 55;
+    else return -1;
+    sum += v * W[i % 3];
+  }
+  return sum % 10;
+}
+
+const validYymmdd = (s) => {
+  const mm = +s.slice(2, 4), dd = +s.slice(4, 6);
+  return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
+};
+
+// Line 1: P + type/filler + issuing state + SURNAME<<GIVEN<NAMES<<<…
+const MRZ_LINE1 = /(?<![A-Z0-9<«])P[<«KC]?([A-Z]{3})([A-Z<«]{15,41})/g;
+// Line 2: doc no.(9) check · nationality(3) · birth YYMMDD + check · sex · expiry YYMMDD + check · rest
+const MRZ_LINE2 = /(?<![A-Z0-9<])([A-Z0-9<]{9})([0-9<])([A-Z<]{3})(\d{6})(\d)([MFX<])(\d{6})(\d)([A-Z0-9<]{0,16})/g;
+
+/** Passport numbers written in the MRZ (doc number field, fillers removed). */
+function mrzDocNumbers(text) {
+  const out = new Set();
+  const re = new RegExp(MRZ_LINE2.source, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (validYymmdd(m[4]) && validYymmdd(m[7])) out.add(m[1].replace(/</g, ''));
+  }
+  return out;
+}
+
+function detectMrz(text, out) {
+  let m;
+  const r1 = new RegExp(MRZ_LINE1.source, 'g');
+  while ((m = r1.exec(text)) !== null) {
+    if (!/[<«]{2}/.test(m[2])) continue;            // SURNAME<<GIVEN: the filler pair is required
+    out.push(mk(PS_TYPES.PASSPORT_MRZ, m, 0.95, 'mrz-line1'));
+  }
+  const r2 = new RegExp(MRZ_LINE2.source, 'g');
+  while ((m = r2.exec(text)) !== null) {
+    const [, doc, docCheck, , birth, birthCheck, , expiry, expiryCheck] = m;
+    if (!validYymmdd(birth) || !validYymmdd(expiry)) continue;
+    if (!/\d/.test(doc)) continue;
+    const checks = [
+      psMrzCheckDigit(doc) === +docCheck,
+      psMrzCheckDigit(birth) === +birthCheck,
+      psMrzCheckDigit(expiry) === +expiryCheck
+    ].filter(Boolean).length;
+    out.push(mk(PS_TYPES.PASSPORT_MRZ, m, checks ? 0.95 : 0.8, checks ? 'mrz-line2+check' : 'mrz-line2'));
+  }
+}
+
+const MONTHS = 'JAN(?:UARY|UARI)?|FEB(?:RUARY|RUARI)?|MAR(?:CH|ET)?|APR(?:IL)?|MAY|MEI|JUNE?|JUNI|JULY?|JULI|AUG(?:UST)?|AGU(?:STUS)?|AGS|SEPT?(?:EMBER)?|OCT(?:OBER)?|OKT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?|DES(?:EMBER)?';
+const DATE_PATTERNS = [
+  // 19 DEC 2008 / 19-Dec-2008 / 19 Desember 2008 / 19DEC2008
+  new RegExp(`(?<![\\dA-Za-z])(?:0?[1-9]|[12]\\d|3[01])[ \\t\\-./]?(?:${MONTHS})\\.?[ \\t\\-./,]*(?:19|20)\\d{2}(?!\\d)`, 'gi'),
+  // 19/12/2008, 19-12-2008, 19.12.2008
+  /(?<!\d)(?:0?[1-9]|[12]\d|3[01])([\/\-.])(?:0?[1-9]|1[0-2])\1(?:19|20)\d{2}(?!\d)/g,
+  // 2008-12-19
+  /(?<!\d)(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d)/g
+];
+// "Tanggal lahir", "Tgl. Lahir", "Tempat/Tgl Lahir", "TTL", "Date of birth", "DOB", "born", "lahir".
+const BIRTH_CUE = /\b(?:lahir|ttl|date\s*of\s*birth|birth\s*date|d\.?\s?o\.?\s?b|born|birthday)\b/g;
+// Other dates printed on the same documents: not a date of birth when one of these labels is closer.
+const OTHER_DATE_CUE = /\b(?:issued?|expiry|expires?|expiration|valid|berlaku|habis|pengeluaran|dikeluarkan|terbit|diterbitkan|keberangkatan|departure|boarding|jatuh\s+tempo)\b/g;
+
+function lastIndexOfRe(re, s) {
+  const r = new RegExp(re.source, 'g');
+  let m, pos = -1;
+  while ((m = r.exec(s)) !== null) { pos = m.index; if (m[0].length === 0) r.lastIndex++; }
+  return pos;
+}
+
+/** A date is a date of birth when a birth label is the closest date label (same line or the line above). */
+function birthContext(text, start) {
+  const ctx = previousLine(text, start) + '\n' + before(text, start, 120);
+  const birth = lastIndexOfRe(BIRTH_CUE, ctx);
+  return birth >= 0 && birth > lastIndexOfRe(OTHER_DATE_CUE, ctx);
+}
+
+function detectDateOfBirth(text, out) {
+  for (const re of DATE_PATTERNS) {
+    const r = new RegExp(re.source, re.flags);
+    let m;
+    while ((m = r.exec(text)) !== null) {
+      if (!birthContext(text, m.index)) continue;
+      out.push(mk(PS_TYPES.DATE_OF_BIRTH, m, 0.9, 'date+birth-label'));
+    }
+  }
+  // MRZ birth date (YYMMDD + check digit, e.g. 0812191 = 2008-12-19) right before the sex field, for
+  // when OCR split the MRZ line and the full-line pattern does not match. Needs a valid check digit.
+  const r = /(?<!\d)(\d{6})(\d)(?=[MFX<]\d{7})/g;
+  let m;
+  while ((m = r.exec(text)) !== null) {
+    if (!validYymmdd(m[1]) || psMrzCheckDigit(m[1]) !== +m[2]) continue;
+    out.push(mk(PS_TYPES.DATE_OF_BIRTH, m, 0.85, 'mrz-birth+check'));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Names (rule-based, Indonesian + English cues). Not NER — see docs/LIMITATIONS.md.
 // ---------------------------------------------------------------------------
 const NAME_W = "[A-Z][a-z'’]+(?:-[A-Za-z][a-z'’]+)?";
 const NAME = `${NAME_W}(?:[ \\t]+${NAME_W}){0,3}`;
 const NAME_UPPER = '[A-Z]{2,}(?:[ \\t]+[A-Z]{2,}){0,3}';
+const NAME_UPPER_LONG = '[A-Z]{2,}(?:[ \\t]+[A-Z]{2,}){1,4}';
+// Name labels as printed on Indonesian IDs and passports, alone or bilingual ("Nama Lengkap/Full Name").
+const NAME_LABEL = '(?:[Nn]ama|NAMA)(?:[ \\t]+(?:[Ll]engkap|LENGKAP))?|(?:[Ff]ull|FULL)[ \\t]+(?:[Nn]ame|NAME)|[Nn]ame|NAME|[Ss]urname|SURNAME|[Gg]iven[ \\t]+[Nn]ames?|GIVEN[ \\t]+NAMES?';
 
 const NAME_STOP = new Set([
   'Customer', 'Care', 'Service', 'Bank', 'Tim', 'Team', 'Admin', 'Direksi', 'Direktur', 'Manager', 'Manajer',
@@ -354,6 +479,8 @@ const NAME_RULES = [
   [new RegExp(`\\b[Ss]aya[ \\t]+(${NAME})(?=[ \\t]*(?:,|dengan\\b|selaku\\b|dari\\b|yang\\b|\\(|$))`, 'gm'), 0.75, 'saya-name'],
   [new RegExp(`\\b(?:Bapak|Bpk\\.?|Bp\\.|Ibu|Bu|Pak|Sdr\\.?|Sdri\\.?|Saudara|Saudari|Mr\\.?|Mrs\\.?|Ms\\.?|Mbak|Mas|Kak|Dr\\.|dr\\.)[ \\t]+(${NAME})`, 'g'), 0.8, 'honorific'],
   [new RegExp(`\\b(?:Yth\\.?|Kepada(?:[ \\t]+Yth\\.?)?|Dear)[ \\t]+(?:(?:Bapak|Ibu|Bpk\\.?|Mr\\.?|Mrs\\.?|Ms\\.?)[ \\t]+)?(${NAME})`, 'g'), 0.75, 'salutation'],
+  // Label alone on its line, name on the next: "Nama Lengkap/Full Name\nSTEFANUS ADITYA PUTRA SIHOTANG".
+  [new RegExp(`(?:^|\n)[ \\t]*(?:${NAME_LABEL})(?:[ \\t]*[\\/|][ \\t]*(?:${NAME_LABEL}))?[ \\t]*:?[ \\t]*\r?\n[ \\t]*(${NAME_UPPER_LONG})[ \\t]*(?=\r?\n|$)`, 'g'), 0.85, 'label-above-name'],
   [new RegExp(`(?:Hormat[ \\t]+saya|Salam|Regards|Best[ \\t]+regards|Sincerely|Terima[ \\t]+kasih|Thanks|Wassalam)[,.!]?[ \\t]*\\r?\\n+[ \\t]*(${NAME})[ \\t]*(?=\\r?\\n|$)`, 'g'), 0.8, 'signature']
 ];
 
@@ -418,6 +545,8 @@ function psDetectAll(text, opts) {
   detectNik(text, cands);
   detectNpwp(text, cands);
   detectPassport(text, cands);
+  detectMrz(text, cands);
+  detectDateOfBirth(text, cands);
   detectPhone(text, cands);
   detectEmail(text, cands);
   detectCard(text, cands);
@@ -440,9 +569,10 @@ if (typeof globalThis !== 'undefined') {
   globalThis.psCardIin = psCardIin;
   globalThis.psEntropy = psEntropy;
   globalThis.psResolveOverlaps = psResolveOverlaps;
+  globalThis.psMrzCheckDigit = psMrzCheckDigit;
   globalThis.psDetectAll = psDetectAll;
 }
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { PS_PROVINCES, psLuhn, psValidNik, psCardIin, psEntropy, psResolveOverlaps, psDetectAll };
+  module.exports = { PS_PROVINCES, psLuhn, psValidNik, psCardIin, psEntropy, psResolveOverlaps, psMrzCheckDigit, psDetectAll };
 }
 })();

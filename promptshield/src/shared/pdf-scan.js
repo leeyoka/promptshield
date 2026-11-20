@@ -20,7 +20,8 @@ var psPdfScan = (() => {
   const MAX_BYTES = 30 * 1024 * 1024;   // larger PDFs are refused (fail closed in the page)
   const MAX_PAGES = 300;                // text extraction
   const MAX_OCR_PAGES = 20;             // OCR is slow (seconds per page); later pages: text only
-  const OCR_PAGE_PX = 2000;             // longest side of a rendered page
+  const OCR_SCALE = 3;                  // page render scale for OCR: small print (e.g. a passport photo) stays sharp
+  const OCR_PAGE_MAX_PX = 4200;         // cap for oversized pages (A4 at 3x = 2526 x 3572 px)
   const MIN_TEXT_CHARS = 20;            // fewer letters/digits than this: treat the page as scanned
   const MAX_OCR_IMAGES = 12;            // embedded images OCR'd on their own, per document
   const MIN_IMAGE_SIDE = 80;            // smaller embedded images (icons, logos, lines) are skipped
@@ -56,7 +57,7 @@ var psPdfScan = (() => {
 
   async function renderPage(page) {
     const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(3, Math.max(0.5, OCR_PAGE_PX / Math.max(base.width, base.height)));
+    const scale = Math.max(0.5, Math.min(OCR_SCALE, OCR_PAGE_MAX_PX / Math.max(base.width, base.height)));
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);

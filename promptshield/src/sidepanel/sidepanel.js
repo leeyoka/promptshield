@@ -155,6 +155,8 @@
       CARD: 'Nomor kartu + nama cukup untuk transaksi online tanpa fisik kartu.',
       BANK_ACCOUNT: 'Nomor rekening + nama cukup untuk transfer fraud.',
       PASSPORT: 'Nomor paspor membuka akses ke layanan imigrasi atas namamu.',
+      PASSPORT_MRZ: 'Baris MRZ memuat nama, nomor paspor, dan tanggal lahirmu sekaligus.',
+      DATE_OF_BIRTH: 'Tanggal lahir sering dipakai sebagai jawaban verifikasi bank dan akun.',
       FLIGHT_NUMBER: 'Data penerbangan bisa digunakan untuk mengklaim bagasimu.',
       BOOKING_CODE: 'Kode booking bisa dipakai untuk check-in atau mengubah penerbangan.',
       NAME: 'Nama lengkap dikombinasikan data lain mempermudah identity theft.'
@@ -168,6 +170,8 @@
       CARD: 'Card number + name is enough for online payments without the physical card.',
       BANK_ACCOUNT: 'Account number + name is enough for transfer fraud.',
       PASSPORT: 'A passport number opens immigration services in your name.',
+      PASSPORT_MRZ: 'The MRZ lines hold your name, passport number and date of birth in one place.',
+      DATE_OF_BIRTH: 'A date of birth is a common verification answer for banks and accounts.',
       FLIGHT_NUMBER: 'Flight details can be used to claim your baggage.',
       BOOKING_CODE: 'A booking code can be used to check in or change your flight.',
       NAME: 'A full name combined with other data makes identity theft easier.'
