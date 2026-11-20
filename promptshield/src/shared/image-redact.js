@@ -99,9 +99,16 @@ var psImageRedact = (() => {
 
   // Classic "censor mosaic": square blocks, one solid colour each (the block's average).
   // Canvas-based (no CSS blur): shrink so each block becomes one pixel, then scale back up
-  // with smoothing off. Fixed 22 px blocks on every image; never below 18 px.
+  // with smoothing off. Blocks are at least 22 px and grow with the photo (~40 blocks across the
+  // long side): a fixed 22 px block on a 4000 px phone photo is ~2 px once shown in a chat or in
+  // the popup preview, i.e. the face and text stay fully readable.
   const MOSAIC_BLOCK = 22;
   const MOSAIC_MIN_BLOCK = 18;
+  const MOSAIC_BLOCKS_ACROSS = 40;
+
+  function mosaicBlockSize(w, h) {
+    return Math.max(MOSAIC_BLOCK, Math.round(Math.max(w, h) / MOSAIC_BLOCKS_ACROSS));
+  }
 
   /** Pixelate the WHOLE canvas in place. blockSize is clamped to >= MOSAIC_MIN_BLOCK. */
   function pixelateCanvas(canvas, blockSize = MOSAIC_BLOCK) {
@@ -131,7 +138,7 @@ var psImageRedact = (() => {
     return canvas;
   }
 
-  return { matchKey, wordsFromTesseract, locateValue, mapBoxToSource, padBox, locateFindings, pixelateCanvas, MOSAIC_BLOCK, MOSAIC_MIN_BLOCK };
+  return { matchKey, wordsFromTesseract, locateValue, mapBoxToSource, padBox, locateFindings, pixelateCanvas, mosaicBlockSize, MOSAIC_BLOCK, MOSAIC_MIN_BLOCK };
 })();
 
 if (typeof globalThis !== 'undefined') globalThis.psImageRedact = psImageRedact;

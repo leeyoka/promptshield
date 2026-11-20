@@ -60,6 +60,18 @@ var psOcr = (() => {
   // line is skipped and recognize() succeeds), but Emscripten routes it to console.warn, so Chrome
   // lists it as an extension error. debug_file=/dev/null makes Tesseract print nothing.
   const TESS_OPTS = { debug_file: '/dev/null' };
+
+  // A Tesseract WASM abort can leave recognize() pending forever instead of rejecting. Give each
+  // pass a deadline so one bad image/page is skipped and the rest of the scan still finishes.
+  const RECOGNIZE_TIMEOUT_MS = 30000;
+  function recognizeWithTimeout(worker, image) {
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('ocr_pass_timeout')), RECOGNIZE_TIMEOUT_MS);
+    });
+    return Promise.race([worker.recognize(image, TESS_OPTS, { text: true, blocks: true }), deadline])
+      .finally(() => clearTimeout(timer));
+  }
   const sizeOf = (src) => ({
     w: (src && (src.naturalWidth || src.videoWidth || src.width)) || 0,
     h: (src && (src.naturalHeight || src.videoHeight || src.height)) || 0
@@ -153,7 +165,7 @@ var psOcr = (() => {
       if (variant.width < MIN_OCR_PX || variant.height < MIN_OCR_PX) break;
       let data;
       try {
-        ({ data } = await worker.recognize(variant, TESS_OPTS, { text: true, blocks: true }));
+        ({ data } = await recognizeWithTimeout(worker, variant));
       } catch (err) {
         // One bad image must not stop the rest of the scan (other pages, pictures, files).
         ocrSkipped(err);
