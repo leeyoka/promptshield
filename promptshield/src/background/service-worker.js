@@ -196,7 +196,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })()
       .catch((e) => ({ success: false, error: (e && e.message) || 'scan_failed' }))
       .then((res) => {
-        sendResponse(res);                                   // the page's popup
+        sendResponse(res);                                   // the page's popup (reply channel)
+        // Second delivery path: if the reply channel was dropped (worker restart, frame change, …)
+        // the page's "scanning…" dialog would wait forever. Push the same result to the exact tab
+        // and frame; the page takes whichever arrives first (matched by scanId).
+        if (message.scanId) {
+          chrome.tabs.sendMessage(sender.tab.id, { type: 'PS_SCAN_COMPLETE', scanId: String(message.scanId), result: res },
+            typeof sender.frameId === 'number' ? { frameId: sender.frameId } : undefined)
+            .catch(() => { /* tab closed or navigated away */ });
+        }
         notifyPanel(uploadScan.kind, message.fileName, site, res);   // and the side panel, if open
       })
       .finally(scanEnded);

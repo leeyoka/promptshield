@@ -1112,19 +1112,46 @@
 
   const baseName = (name, fallback) => String(name || fallback).replace(/\.[^.]+$/, '') || fallback;
 
-  /** chrome.runtime.sendMessage for long scans (own timeout, typed failure). */
+  // Scans in flight, by scanId. A result arrives on the sendMessage reply AND as a pushed
+  // PS_SCAN_COMPLETE message from the service worker; the first one settles the scan, so the
+  // "scanning…" dialog can never hang because one channel was dropped.
+  const pendingScans = new Map();
+  let scanSeq = 0;
+
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (!msg || msg.type !== 'PS_SCAN_COMPLETE' || sender.id !== chrome.runtime.id) return false;
+    const done = pendingScans.get(String(msg.scanId || ''));
+    if (done) done(msg.result, null);
+    return false;
+  });
+
+  /** chrome.runtime.sendMessage for long scans (own timeout, typed failure, pushed-result fallback). */
   function sendScan(msg, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+      const scanId = `${Date.now().toString(36)}-${++scanSeq}-${Math.random().toString(36).slice(2, 8)}`;
+      let replyError = null;
+      const finish = (res, err) => {
+        if (!pendingScans.has(scanId)) return;               // already settled by the other channel
+        pendingScans.delete(scanId);
+        clearTimeout(timer);
+        if (err) reject(err);
+        else if (!res || !res.success) reject(new Error((res && res.error) || 'no response'));
+        else resolve(res);
+      };
+      pendingScans.set(scanId, finish);
+      const timer = setTimeout(() => finish(null, replyError || new Error('timeout')), timeoutMs);
       try {
-        chrome.runtime.sendMessage(msg, (res) => {
-          clearTimeout(timer);
+        chrome.runtime.sendMessage({ ...msg, scanId }, (res) => {
           const err = chrome.runtime.lastError;
-          if (err) reject(new Error(err.message));
-          else if (!res || !res.success) reject(new Error((res && res.error) || 'no response'));
-          else resolve(res);
+          if (err) {
+            // The reply channel closed early: keep waiting for the pushed PS_SCAN_COMPLETE.
+            replyError = new Error(err.message);
+            dlog('scan reply channel lost, waiting for pushed result', err.message);
+            return;
+          }
+          finish(res, null);
         });
-      } catch (e) { clearTimeout(timer); reject(e); }
+      } catch (e) { finish(null, e); }
     });
   }
 
