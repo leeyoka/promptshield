@@ -14,7 +14,10 @@
   // The message box: skip editors inside replies, take the bottom-most visible candidate.
   function composerText() {
     let el = null, bottom = -Infinity;
-    for (const c of document.querySelectorAll('#prompt-textarea, div.ProseMirror[contenteditable="true"], form [contenteditable="true"], form textarea')) {
+    const selector = /(^|\.)web\.whatsapp\.com$/.test(location.hostname)
+      ? 'footer div[contenteditable="true"]'
+      : '#prompt-textarea, div.ProseMirror[contenteditable="true"], form [contenteditable="true"], form textarea';
+    for (const c of document.querySelectorAll(selector)) {
       if (c.closest('[data-message-author-role], article, [data-testid^="conversation-turn"], [data-turn]')) continue;
       const r = c.getBoundingClientRect();
       if (r.width > 0 && r.height > 0 && r.bottom > bottom) { bottom = r.bottom; el = c; }
