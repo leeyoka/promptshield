@@ -47,6 +47,8 @@
 
   for (const type of EVENTS) {
     window.addEventListener(type, (e) => {
+      // After an extension reload this copy is orphaned: stand down and let the new instance guard.
+      try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
       const guard = window.__psGuard;
       if (guard && typeof guard[type] === 'function') guard[type](e);
       else if (!guard) preReady(e);
