@@ -12,6 +12,8 @@ var PS_TYPES = {
   API_KEY: 'API_KEY',
   NAME: 'NAME',
   PASSPORT: 'PASSPORT',
+  PASSPORT_MRZ: 'PASSPORT_MRZ',
+  DATE_OF_BIRTH: 'DATE_OF_BIRTH',
   FLIGHT_NUMBER: 'FLIGHT_NUMBER',
   BOOKING_CODE: 'BOOKING_CODE',
   IATA_AIRPORT: 'IATA_AIRPORT',
@@ -29,6 +31,8 @@ var PS_TYPE_LABELS = {
   API_KEY: { id: 'Kunci API', en: 'API key / secret' },
   NAME: { id: 'Nama', en: 'Name' },
   PASSPORT: { id: 'No. Paspor', en: 'Passport number' },
+  PASSPORT_MRZ: { id: 'Kode MRZ paspor', en: 'Passport MRZ' },
+  DATE_OF_BIRTH: { id: 'Tanggal Lahir', en: 'Date of birth' },
   FLIGHT_NUMBER: { id: 'Nomor Penerbangan', en: 'Flight number' },
   BOOKING_CODE: { id: 'Kode Booking', en: 'Booking code (PNR)' },
   IATA_AIRPORT: { id: 'Kode Bandara', en: 'Airport code' },
@@ -104,7 +108,7 @@ var PS_ENERGY = {
 var PS_DEFAULTS = {
   enabledTypes: {
     NIK: true, NPWP: true, PHONE: true, EMAIL: true, CARD: true, BANK_ACCOUNT: true, API_KEY: true, NAME: true,
-    PASSPORT: true, FLIGHT_NUMBER: true, BOOKING_CODE: true, IATA_AIRPORT: true, BOARDING_DATE: true
+    PASSPORT: true, PASSPORT_MRZ: true, DATE_OF_BIRTH: true, FLIGHT_NUMBER: true, BOOKING_CODE: true, IATA_AIRPORT: true, BOARDING_DATE: true
   },
   confidenceThreshold: 0.7,   // findings below this are listed unticked and never open the sheet alone
   rightSize: true,            // show right-size advice
@@ -125,6 +129,8 @@ var PS_COLORS = {
   API_KEY: { bg: '#edebfe', border: '#5521b5', text: '#4a1d96' },
   NAME: { bg: '#e1effe', border: '#1a56db', text: '#1e429f' },
   PASSPORT: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
+  PASSPORT_MRZ: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
+  DATE_OF_BIRTH: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' },
   FLIGHT_NUMBER: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' },
   BOOKING_CODE: { bg: '#fde8e8', border: '#c81e1e', text: '#9b1c1c' },
   IATA_AIRPORT: { bg: '#fdf6b2', border: '#9f580a', text: '#723b13' },

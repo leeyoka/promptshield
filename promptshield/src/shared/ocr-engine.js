@@ -68,8 +68,7 @@ var psOcr = (() => {
 
   const variantScale = (src) => Math.min(3, Math.max(0.5, TARGET_PX / Math.max(src.width, src.height)));
 
-  function makeVariant(src, rot, mode) {
-    const scale = variantScale(src);
+  function makeVariant(src, rot, mode, scale = variantScale(src)) {
     const w = Math.round(src.width * scale), h = Math.round(src.height * scale);
     const swap = rot === 90 || rot === 270;
     const canvas = document.createElement('canvas');
@@ -104,15 +103,16 @@ var psOcr = (() => {
     // A rendered PDF page is mostly white paper: the photo contrast stretch can wash its text out,
     // so read the clean render first and keep the photo passes for scanned pages that need them.
     const plan = page ? [{ rot: 0, mode: 'raw' }, ...PASSES] : PASSES;
+    // A PDF page is already rendered at OCR resolution (pdf-scan.js, 3x): keep it, do not shrink it.
+    const scale = page ? 1 : variantScale(src);
     const passes = [];
     let analysis = null, allText = '', bestText = '', bestScore = -1, empty = 0;
     for (let i = 0; i < plan.length; i++) {
       if (isCancelled && isCancelled()) return { analysis, allText, bestText, passes, cancelled: true };
       const { rot, mode } = plan[i];
       if (i > 0 && onStep) onStep(i + 1, plan.length);
-      const { data } = await worker.recognize(makeVariant(src, rot, mode), {}, { text: true, blocks: true });
+      const { data } = await worker.recognize(makeVariant(src, rot, mode, scale), {}, { text: true, blocks: true });
       const text = (data && data.text) || '';
-      const scale = variantScale(src);
       passes.push({ rot, scale, w: Math.round(src.width * scale), h: Math.round(src.height * scale), words: psImageRedact.wordsFromTesseract(data) });
       const score = alnumCount(text) * ((data && data.confidence) || 0);
       if (score > bestScore) { bestScore = score; bestText = text; }
