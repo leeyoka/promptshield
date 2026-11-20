@@ -75,3 +75,27 @@ test('a scanned page: an OCR-only finding is merged, located and masked in the s
   assert.doesNotMatch(safe, new RegExp(NIK));
   assert.match(safe, /\[NIK_MASKED\]/);
 });
+
+test('mergeFindings adds embedded-image OCR findings and de-duplicates them against the other passes', () => {
+  const m = P.mergeFindings(
+    [{ type: 'NIK', value: NIK, confidence: 0.9 }],
+    [{ type: 'NIK', value: NIK, confidence: 0.9 }],
+    [{ type: 'NIK', value: NIK, confidence: 0.8 }, { type: 'PASSPORT', value: 'B1234567', confidence: 0.9 }]
+  );
+  assert.equal(m.length, 2);
+  assert.deepEqual(m.find((f) => f.type === 'NIK').sources, ['text', 'ocr', 'image']);
+  assert.deepEqual(m.find((f) => f.type === 'PASSPORT').sources, ['image']);
+});
+
+test('imageObjectToRgba converts PDF.js RGB, RGBA and 1-bit images', () => {
+  const rgb = P.imageObjectToRgba({ width: 2, height: 1, kind: 2, data: new Uint8Array([10, 20, 30, 40, 50, 60]) });
+  assert.deepEqual([...rgb], [10, 20, 30, 255, 40, 50, 60, 255]);
+  const rgba = P.imageObjectToRgba({ width: 1, height: 1, kind: 3, data: new Uint8ClampedArray([1, 2, 3, 4]) });
+  assert.deepEqual([...rgba], [1, 2, 3, 4]);
+  // 1 bpp, width 3 -> one padded byte per row; bit set = white.
+  const bw = P.imageObjectToRgba({ width: 3, height: 2, kind: 1, data: new Uint8Array([0b10100000, 0b01000000]) });
+  const grey = [...bw].filter((_, i) => i % 4 === 0);
+  assert.deepEqual(grey, [255, 0, 255, 0, 255, 0]);
+  assert.equal(P.imageObjectToRgba({ width: 2, height: 2, kind: 2, data: new Uint8Array(3) }), null);   // truncated
+  assert.equal(P.imageObjectToRgba({ width: 1, height: 1, kind: 9, data: new Uint8Array(4) }), null);   // unknown kind
+});

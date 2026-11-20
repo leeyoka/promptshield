@@ -1,8 +1,10 @@
-// PromptShield PDF scan: two passes over every page, merged.
+// PromptShield PDF scan: three passes, all of them always run, merged.
 //   1. Text extraction with the bundled PDF.js (getTextContent): PDFs with embedded text, e.g. forms.
 //   2. OCR: each page is rendered to a canvas and read with Tesseract (psOcr): scanned PDFs, e.g. a
-//      photographed KTP saved as PDF, or a text PDF with an embedded photo of an ID card.
-// Findings from both passes are merged and de-duplicated by type + value (same canonical form the
+//      photographed KTP saved as PDF.
+//   3. Image OCR: on pages with a text layer, every embedded picture (e.g. a passport photo inside a
+//      form) is OCR'd on its own with the photo passes, so page text cannot mask it.
+// Findings from all passes are merged and de-duplicated by type + value (same canonical form the
 // masker uses, so "3273 0551 0299 0004" and "3273055102990004" are one finding).
 // Everything stays on the device; no network.
 //
@@ -20,6 +22,9 @@ var psPdfScan = (() => {
   const MAX_OCR_PAGES = 20;             // OCR is slow (seconds per page); later pages: text only
   const OCR_PAGE_PX = 2000;             // longest side of a rendered page
   const MIN_TEXT_CHARS = 20;            // fewer letters/digits than this: treat the page as scanned
+  const MAX_OCR_IMAGES = 12;            // embedded images OCR'd on their own, per document
+  const MIN_IMAGE_SIDE = 80;            // smaller embedded images (icons, logos, lines) are skipped
+  const MIN_IMAGE_LONG = 160;
 
   const alnum = (s) => (String(s).match(/[A-Za-z0-9]/g) || []).length;
 
@@ -64,8 +69,54 @@ var psPdfScan = (() => {
   }
 
   /**
-   * Read every page: embedded text, and (for the first MAX_OCR_PAGES pages, when ocr is on) OCR text.
-   * @returns {Promise<{pages:Array<{text:string, ocrText:string|null, ocrFindings:Array}>, numPages, truncated, ocrPages}>}
+   * The embedded raster images a page draws (decoded by PDF.js), big enough to hold readable text.
+   * Call after page.render(): the image objects are resolved by then.
+   */
+  async function embeddedImages(page) {
+    const OPS = lib().OPS;
+    const ops = await page.getOperatorList();
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const fn = ops.fnArray[i];
+      const args = ops.argsArray[i] || [];
+      let img = null;
+      if (fn === OPS.paintImageXObject || fn === OPS.paintImageXObjectRepeat) {
+        const id = args[0];
+        if (typeof id !== 'string' || seen.has(id)) continue;
+        seen.add(id);
+        try { img = (id.startsWith('g_') ? page.commonObjs : page.objs).get(id); } catch (_) { img = null; }
+      } else if (fn === OPS.paintInlineImageXObject) {
+        img = args[0];
+      }
+      if (!img || !img.width || !img.height) continue;
+      if (Math.min(img.width, img.height) < MIN_IMAGE_SIDE || Math.max(img.width, img.height) < MIN_IMAGE_LONG) continue;
+      out.push(img);
+    }
+    return out;
+  }
+
+  /** Draw a PDF.js image object onto a white canvas (null when its pixel format is unknown). */
+  function imageToCanvas(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (img.bitmap) { ctx.drawImage(img.bitmap, 0, 0); return canvas; }
+    const rgba = imageObjectToRgba(img);
+    if (!rgba) return null;
+    ctx.putImageData(new ImageData(rgba, img.width, img.height), 0, 0);
+    return canvas;
+  }
+
+  /**
+   * Read every page: embedded text, and (for the first MAX_OCR_PAGES pages, when ocr is on) OCR of
+   * the rendered page. On pages that also have a text layer, each embedded image is OCR'd on its own
+   * with the full photo passes (rotations, pattern removal): page OCR there mostly re-reads the text
+   * layer and stops at its first finding, so a small ID photo inside the page would be missed.
+   * @returns {Promise<{pages:Array<{text, ocrText:string|null, ocrFindings, imageTexts, imageFindings}>, numPages, truncated, ocrPages, imagesScanned}>}
    */
   async function readPages(bytes, { ocr = true, onPage } = {}) {
     if (!bytes || !bytes.length) throw new Error('bad_pdf');
@@ -83,12 +134,13 @@ var psPdfScan = (() => {
     try {
       const pages = [];
       const n = Math.min(doc.numPages, MAX_PAGES);
-      let ocrPages = 0;
+      let ocrPages = 0, imagesScanned = 0;
       for (let p = 1; p <= n; p++) {
         if (onPage) onPage(p, n);
         const page = await doc.getPage(p);
         const text = pageText(await page.getTextContent());
         let ocrText = null, ocrFindings = [];
+        const imageTexts = [], imageFindings = [];
         if (canOcr && p <= MAX_OCR_PAGES) {
           const canvas = await renderPage(page);
           const r = await psOcr.ocrImage(canvas, { page: true });
@@ -97,11 +149,25 @@ var psPdfScan = (() => {
           ocrFindings = (r.analysis && r.analysis.findings) || [];
           canvas.width = canvas.height = 0;          // free the bitmap now, not at GC time
           ocrPages++;
+
+          // Text page with pictures in it: OCR each picture as a photo, whatever the text pass found.
+          if (alnum(text) >= MIN_TEXT_CHARS && imagesScanned < MAX_OCR_IMAGES) {
+            for (const img of await embeddedImages(page)) {
+              if (imagesScanned >= MAX_OCR_IMAGES) break;
+              const ic = imageToCanvas(img);
+              if (!ic) continue;
+              const ir = await psOcr.ocrImage(ic);
+              imageTexts.push(psDocScan.fixDigits(ir.allText || '').trim());
+              for (const f of (ir.analysis && ir.analysis.findings) || []) imageFindings.push(f);
+              ic.width = ic.height = 0;
+              imagesScanned++;
+            }
+          }
         }
-        pages.push({ text, ocrText, ocrFindings });
+        pages.push({ text, ocrText, ocrFindings, imageTexts, imageFindings });
         page.cleanup();
       }
-      return { pages, numPages: doc.numPages, truncated: doc.numPages > MAX_PAGES, ocrPages };
+      return { pages, numPages: doc.numPages, truncated: doc.numPages > MAX_PAGES, ocrPages, imagesScanned };
     } finally {
       doc.destroy().catch(() => {});
     }
@@ -115,7 +181,7 @@ var psPdfScan = (() => {
    */
   async function scan(input, opts = {}) {
     const bytes = typeof input === 'string' ? bytesFromDataUrl(input) : input;
-    const { pages, numPages, truncated, ocrPages } = await readPages(bytes, { ocr: opts.ocr !== false, onPage: opts.onPage });
+    const { pages, numPages, truncated, ocrPages, imagesScanned } = await readPages(bytes, { ocr: opts.ocr !== false, onPage: opts.onPage });
     const detect = (t) => psDetectAll(t, { enabledTypes: opts.enabledTypes });
     const enabled = (t) => !opts.enabledTypes || opts.enabledTypes[t] !== false;
 
@@ -127,8 +193,13 @@ var psPdfScan = (() => {
       for (const f of detect(p.ocrText)) ocrFindings.push(f);
       for (const f of p.ocrFindings) if (enabled(f.type)) ocrFindings.push(f);   // incl. raw-text hits
     }
+    const imageFindings = [];
+    for (const p of pages) {
+      for (const t of p.imageTexts || []) for (const f of detect(t)) imageFindings.push(f);
+      for (const f of p.imageFindings || []) if (enabled(f.type)) imageFindings.push(f);
+    }
 
-    const merged = mergeFindings(textFindings, ocrFindings);
+    const merged = mergeFindings(textFindings, ocrFindings, imageFindings);
     const text = buildDocText(pages);
     const lang = opts.lang === 'en' ? 'en' : 'id';
     const findings = merged.map((f, id) => ({
@@ -144,7 +215,9 @@ var psPdfScan = (() => {
     // Same rule as typed prompts: only confident findings stop the upload; weaker ones are listed too.
     const hasPII = findings.some((f) => f.confidence >= threshold);
     const safeText = maskText(text, findings, () => true);
-    return { hasPII, findings, text, safeText, pages: numPages, ocrPages, truncated };
+    const types = [...new Set(findings.map((f) => f.type))];
+    // allFindings: same list as findings (every finding from all three passes, de-duplicated).
+    return { hasPII, types, findings, allFindings: findings, text, safeText, pages: numPages, ocrPages, imagesScanned, truncated };
   }
 
   // ── Pure helpers (no DOM, no PDF.js) ─────────────────────────────────────────
@@ -157,7 +230,7 @@ var psPdfScan = (() => {
    * Combine text-layer and OCR findings; one entry per type + canonical value. Keeps the first value
    * seen (text layer wins: it is exact), the highest confidence, and where it was found.
    */
-  function mergeFindings(textFindings, ocrFindings) {
+  function mergeFindings(textFindings, ocrFindings, imageFindings) {
     const byKey = new Map();
     const add = (f, source) => {
       if (!f || !f.type || typeof f.value !== 'string' || !f.value) return;
@@ -172,7 +245,41 @@ var psPdfScan = (() => {
     };
     for (const f of textFindings || []) add(f, 'text');
     for (const f of ocrFindings || []) add(f, 'ocr');
+    for (const f of imageFindings || []) add(f, 'image');
     return [...byKey.values()];
+  }
+
+  /**
+   * RGBA pixels of a decoded PDF.js image object ({width, height, kind, data}); null if unknown.
+   * kind: 1 = 1 bit per pixel (bit set = white, rows padded to whole bytes), 2 = RGB, 3 = RGBA.
+   */
+  function imageObjectToRgba(img) {
+    const { width: w, height: h, kind, data } = img || {};
+    if (!w || !h || !data) return null;
+    const n = w * h;
+    const out = new Uint8ClampedArray(n * 4);
+    if (kind === 3) {
+      if (data.length < n * 4) return null;
+      out.set(data.subarray(0, n * 4));
+    } else if (kind === 2) {
+      if (data.length < n * 3) return null;
+      for (let i = 0, j = 0; i < n; i++, j += 3) {
+        out[i * 4] = data[j]; out[i * 4 + 1] = data[j + 1]; out[i * 4 + 2] = data[j + 2]; out[i * 4 + 3] = 255;
+      }
+    } else if (kind === 1) {
+      const rowBytes = (w + 7) >> 3;
+      if (data.length < rowBytes * h) return null;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const v = (data[y * rowBytes + (x >> 3)] >> (7 - (x & 7))) & 1 ? 255 : 0;
+          const o = (y * w + x) * 4;
+          out[o] = out[o + 1] = out[o + 2] = v; out[o + 3] = 255;
+        }
+      }
+    } else {
+      return null;
+    }
+    return out;
   }
 
   /** Text for the safe version: each page's embedded text, or its OCR text when the page is scanned. */
@@ -206,7 +313,7 @@ var psPdfScan = (() => {
     return items.length ? psMasker.maskTyped(text, items) : text;
   }
 
-  return { scan, readPages, bytesFromDataUrl, mergeFindings, buildDocText, findRanges, maskText, MAX_OCR_PAGES };
+  return { scan, readPages, bytesFromDataUrl, mergeFindings, imageObjectToRgba, buildDocText, findRanges, maskText, MAX_OCR_PAGES };
 })();
 
 if (typeof globalThis !== 'undefined') globalThis.psPdfScan = psPdfScan;

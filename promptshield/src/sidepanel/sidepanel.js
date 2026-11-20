@@ -933,7 +933,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
       ul.className = 'img-pdf-findings small';
       for (const f of r.findings) {
         const li = document.createElement('li');
-        const src = f.sources.map((x) => (x === 'ocr' ? ss.srcOcr : ss.srcText)).join(' + ');
+        const src = [...new Set(f.sources.map((x) => (x === 'text' ? ss.srcText : ss.srcOcr)))].join(' + ');
         li.textContent = `${f.label}: ${psMasker.partialValue(f.value)} (${src})`;
         if (eduNote(f.type)) {
           const edu = document.createElement('span');
