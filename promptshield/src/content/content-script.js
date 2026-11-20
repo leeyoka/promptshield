@@ -1286,6 +1286,10 @@
     const mime = keepMime ? file.type : 'image/png';
     const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png';
 
+    // True when the canvas mosaic failed and a blur was used instead (the preview then also gets a
+    // CSS blur, so it is never shown readable).
+    let mosaicFailed = false;
+
     function paint() {
       const canvas = document.createElement('canvas');
       canvas.width = bitmap.width;
@@ -1293,7 +1297,21 @@
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(bitmap, 0, 0);
       // Any finding switched ON: the WHOLE photo becomes a mosaic (face, text, MRZ, everything).
-      if (items.some((i) => i.approved)) psImageRedact.pixelateCanvas(canvas, psImageRedact.MOSAIC_BLOCK);
+      if (items.some((i) => i.approved)) {
+        try {
+          psImageRedact.pixelateCanvas(canvas, psImageRedact.mosaicBlockSize(canvas.width, canvas.height));
+          mosaicFailed = false;
+        } catch (e) {
+          dlog('mosaic failed, using blur', e && e.message);
+          mosaicFailed = true;
+          // Fallback that still hides everything: a heavy blur of the whole photo.
+          ctx.save();
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.filter = `blur(${Math.max(12, Math.round(Math.max(canvas.width, canvas.height) / 40))}px)`;
+          ctx.drawImage(bitmap, 0, 0);
+          ctx.restore();
+        }
+      }
       return canvas;
     }
 
@@ -1303,7 +1321,13 @@
       refresh(el) {
         const pv = el.querySelector('.up-preview');
         if (!pv) return;
-        const full = paint();
+        const on = items.some((i) => i.approved);
+        let full;
+        try { full = paint(); } catch (e) { dlog('preview paint failed', e && e.message); mosaicFailed = on; full = null; }
+        // Belt and braces: whenever the canvas could not be masked, blur the preview with CSS.
+        pv.style.filter = on && mosaicFailed ? 'blur(8px)' : '';
+        pv.style.transform = on && mosaicFailed ? 'scale(1.05)' : '';
+        if (!full) return;
         const k = Math.min(1, 480 / full.width, 260 / full.height);
         pv.width = Math.max(1, Math.round(full.width * k));
         pv.height = Math.max(1, Math.round(full.height * k));
