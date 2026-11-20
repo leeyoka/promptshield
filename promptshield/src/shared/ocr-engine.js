@@ -33,9 +33,8 @@ var psOcr = (() => {
       workerBlobURL: false,
       logger: () => {}
     });
-    // Note: Tesseract may print "Image too small to scale!! (2x36 vs min width of 3)" for a hairline
-    // text line inside an image. It skips that line and carries on; the message is harmless.
-    // (No setParameters call here: an extra job queued before every scan could stall them all.)
+    // (No setParameters call here: an extra job queued before every scan could stall them all.
+    // Per-scan Tesseract variables go in the recognize() options instead, see TESS_OPTS.)
     try {
       return await _worker;
     } catch (err) {
@@ -55,6 +54,12 @@ var psOcr = (() => {
   // Smallest image worth sending to Tesseract: below this nothing readable fits, and Tesseract
   // rejects images under 3 px outright.
   const MIN_OCR_PX = 50;
+
+  // Tesseract prints internal diagnostics such as "Image too small to scale!! (2x36 vs min width
+  // of 3)" when it meets a hairline speck INSIDE a normal-sized image. It is not an error (that
+  // line is skipped and recognize() succeeds), but Emscripten routes it to console.warn, so Chrome
+  // lists it as an extension error. debug_file=/dev/null makes Tesseract print nothing.
+  const TESS_OPTS = { debug_file: '/dev/null' };
   const sizeOf = (src) => ({
     w: (src && (src.naturalWidth || src.videoWidth || src.width)) || 0,
     h: (src && (src.naturalHeight || src.videoHeight || src.height)) || 0
@@ -148,7 +153,7 @@ var psOcr = (() => {
       if (variant.width < MIN_OCR_PX || variant.height < MIN_OCR_PX) break;
       let data;
       try {
-        ({ data } = await worker.recognize(variant, {}, { text: true, blocks: true }));
+        ({ data } = await worker.recognize(variant, TESS_OPTS, { text: true, blocks: true }));
       } catch (err) {
         // One bad image must not stop the rest of the scan (other pages, pictures, files).
         ocrSkipped(err);

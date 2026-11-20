@@ -600,7 +600,7 @@ Rekening BCA: 1234567890`;
       if (variant.width < MIN_OCR_PX || variant.height < MIN_OCR_PX) break;
       let data;
       try {
-        ({ data } = await worker.recognize(variant));
+        ({ data } = await worker.recognize(variant, { debug_file: '/dev/null' }))   // silence Tesseract's internal "Image too small to scale" diagnostics;
       } catch (err) {
         ocrSkipped(err);
         workerPromise = null;                       // a crashed worker is unusable: start fresh next time
