@@ -1,4 +1,4 @@
-// PromptShield content script for ChatGPT (plus Gemini and WhatsApp Web for the upload guard).
+// PromptShield content script for ChatGPT and WhatsApp Web (send intercept), plus Gemini (upload guard).
 // Flow: intercept send -> detect locally -> review sheet -> mask (tokens from the encrypted vault)
 //       -> write into composer -> read back and verify -> send. On ANY failure nothing is sent.
 // Plus: right-size advice banner, on-screen restore of real values in replies, proof of what was sent.
@@ -195,6 +195,35 @@
   };
 
   // ==========================================================================
+  // WhatsApp Web: same send intercept as ChatGPT, only the DOM lookups differ.
+  // Everything else (scan, review sheet, mask / allow / cancel, verify, restore) is shared.
+  // ==========================================================================
+  if (SITE === 'whatsapp') {
+    Object.assign(adapter, {
+      composerSelectors: ['footer div[contenteditable="true"]'],
+      sendSelectors: [
+        'button[data-testid="send"]',
+        'footer button[aria-label="Send" i]',
+        'footer button[aria-label="Kirim" i]'
+      ],
+      /** The message box lives in the chat footer; anything outside it is a message or another panel. */
+      isInsideReply(el) {
+        return !el.closest('footer');
+      },
+      isSendButton(btn) {
+        if (!btn || !btn.closest('footer')) return false;
+        if ((btn.getAttribute('data-testid') || '').toLowerCase() === 'send') return true;
+        if (btn.querySelector('[data-icon="send"], [data-icon="wds-ic-send-filled"]')) return true;
+        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+        return /^(send|kirim)$/.test(aria);
+      },
+      messageArea() {
+        return document.querySelector('#main') || document.body;
+      }
+    });
+  }
+
+  // ==========================================================================
   // Composer writing with read-back verification
   // ==========================================================================
   const normText = (s) => String(s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
@@ -338,6 +367,8 @@
     if (!findings.length) { toast(T.noneFound, 'success'); return; }
     openSheet(text, findings);
   });
+  // WhatsApp Web has no scan-on-click shield: sends are intercepted automatically (see below).
+  if (SITE === 'whatsapp') statusBtn.remove();
 
   // ---------- Toasts ----------
   function toast(message, kind = 'info', opts = {}) {
@@ -679,6 +710,57 @@
   } else {
     for (const type of Object.keys(guard)) window.addEventListener(type, guard[type], true);
     dlog('send guard registered late (early guard missing)');
+  }
+
+  // ==========================================================================
+  // WhatsApp Web: re-attach on chat switches.
+  // WhatsApp re-renders the footer (message box + send button) whenever another chat opens.
+  // A MutationObserver re-attaches the send guard directly to the new composer and send button,
+  // as a second line behind the window-level capture listeners above. Each event is handled once.
+  // An open review sheet belongs to the chat it was opened in, so it is cancelled on a switch
+  // (nothing is sent, the draft stays in the old chat).
+  // ==========================================================================
+  if (SITE === 'whatsapp') {
+    const handledEvents = new WeakSet();
+    const once = (type) => (e) => {
+      if (handledEvents.has(e)) return;
+      handledEvents.add(e);
+      guard[type](e);
+    };
+    const onceGuard = {};
+    for (const type of Object.keys(guard)) onceGuard[type] = once(type);
+    if (window.__psEarlyGuard) window.__psGuard = onceGuard;
+    else for (const type of Object.keys(guard)) {
+      window.removeEventListener(type, guard[type], true);
+      window.addEventListener(type, onceGuard[type], true);
+    }
+
+    const attached = new WeakSet();
+    function attachTo(el, types) {
+      if (!el || attached.has(el)) return;
+      attached.add(el);
+      for (const type of types) el.addEventListener(type, onceGuard[type], true);
+    }
+
+    let currentComposer = null;
+    function reattachWhatsApp() {
+      const composer = adapter.findComposer();
+      if (composer !== currentComposer) {
+        const switched = !!currentComposer && !currentComposer.isConnected;
+        currentComposer = composer;
+        if (switched && sheet && !busy) { closeSheet(false); dlog('chat switched: review cancelled'); }
+        if (composer) dlog('whatsapp composer attached');
+      }
+      attachTo(composer, ['keydown']);
+      attachTo(adapter.findSendButton(), ['pointerdown', 'mousedown', 'click']);
+    }
+    let reattachQueued = false;
+    new MutationObserver(() => {
+      if (reattachQueued) return;
+      reattachQueued = true;
+      requestAnimationFrame(() => { reattachQueued = false; reattachWhatsApp(); });
+    }).observe(document.body, { childList: true, subtree: true });
+    reattachWhatsApp();
   }
 
   // ==========================================================================
