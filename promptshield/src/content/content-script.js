@@ -328,11 +328,19 @@
   const layer = root.querySelector('.layer');
   const statusBtn = root.querySelector('.status');
 
+  // Exactly one UI per tab. After an extension reload/update the previous content script keeps running
+  // (orphaned) in the open tab, and the new one would add a second host, stacking the shield icon.
+  // The newest instance removes older hosts; an orphaned instance stops re-mounting its own.
+  const isOrphaned = () => { try { return !chrome.runtime || !chrome.runtime.id; } catch (_) { return true; } };
+  for (const old of document.querySelectorAll('#promptshield-root')) old.remove();
+  const mountTimer = setInterval(mountHost, 3000);
   function mountHost() {
-    if (!host.isConnected) document.documentElement.appendChild(host);
+    if (isOrphaned()) { clearInterval(mountTimer); host.remove(); return; }
+    if (host.isConnected) return;
+    if (document.querySelector('#promptshield-root')) return;   // another instance owns the UI
+    document.documentElement.appendChild(host);
   }
   mountHost();
-  setInterval(mountHost, 3000);
 
   function syncTheme() {
     host.setAttribute('data-theme', adapter.isDarkTheme() ? 'dark' : 'light');
@@ -723,7 +731,7 @@
   if (SITE === 'whatsapp') {
     const handledEvents = new WeakSet();
     const once = (type) => (e) => {
-      if (handledEvents.has(e)) return;
+      if (handledEvents.has(e) || isOrphaned()) return;
       handledEvents.add(e);
       guard[type](e);
     };
