@@ -14,6 +14,9 @@
 'use strict';
 
 var psOcr = (() => {
+  // DEBUG-gated log for OCR skipped on one image/page (error message only, never content).
+  const DEBUG = false;
+  const ocrSkipped = (err) => { if (DEBUG) console.debug('[PromptShield] OCR skipped:', (err && err.message) || err); };
   // workerBlobURL:false: MV3 CSP forbids blob: scripts, so the worker loads straight from the
   // extension package. corePath/langPath point at bundled files so nothing is fetched from a CDN.
   const extUrl = (p) => (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -30,6 +33,9 @@ var psOcr = (() => {
       workerBlobURL: false,
       logger: () => {}
     });
+    // Note: Tesseract may print "Image too small to scale!! (2x36 vs min width of 3)" for a hairline
+    // text line inside an image. It skips that line and carries on; the message is harmless.
+    // (No setParameters call here: an extra job queued before every scan could stall them all.)
     try {
       return await _worker;
     } catch (err) {
@@ -37,6 +43,22 @@ var psOcr = (() => {
       throw err;
     }
   }
+
+  /** Throw away the current worker (e.g. after a scan hung); the next scan starts a fresh one. */
+  async function reset() {
+    const w = _worker;
+    _worker = null;
+    if (!w) return;
+    try { (await w).terminate(); } catch (_) { /* already gone */ }
+  }
+
+  // Smallest image worth sending to Tesseract: below this nothing readable fits, and Tesseract
+  // rejects images under 3 px outright.
+  const MIN_OCR_PX = 50;
+  const sizeOf = (src) => ({
+    w: (src && (src.naturalWidth || src.videoWidth || src.width)) || 0,
+    h: (src && (src.naturalHeight || src.videoHeight || src.height)) || 0
+  });
 
   // Phone photos of ID cards are hard for OCR: small text, coloured security patterns, glare,
   // and sideways shots. Each pass upscales the image, removes the background pattern
@@ -98,8 +120,18 @@ var psOcr = (() => {
    *   bestText is the single pass that read best (for a text version); allText joins every pass.
    */
   async function ocrImage(src, { onStep, isCancelled, page = false } = {}) {
-    const worker = await getWorker();
     const detect = typeof psDetectAll === 'function' ? psDetectAll : null;
+    // Every OCR in the extension comes through here (photos, PDF pages, PDF and Word images):
+    // images or rendered pages smaller than 50 x 50 px are not sent to Tesseract at all.
+    const { w, h } = sizeOf(src);
+    if (w < MIN_OCR_PX || h < MIN_OCR_PX) {
+      return { analysis: psDocScan.analyze('', detect), allText: '', bestText: '', passes: [], cancelled: false, skipped: 'too_small' };
+    }
+    let worker;
+    try { worker = await getWorker(); } catch (err) {
+      ocrSkipped(err);
+      return { analysis: psDocScan.analyze('', detect), allText: '', bestText: '', passes: [], cancelled: false, skipped: 'ocr_failed' };
+    }
     // A rendered PDF page is mostly white paper: the photo contrast stretch can wash its text out,
     // so read the clean render first and keep the photo passes for scanned pages that need them.
     const plan = page ? [{ rot: 0, mode: 'raw' }, ...PASSES] : PASSES;
@@ -111,7 +143,20 @@ var psOcr = (() => {
       if (isCancelled && isCancelled()) return { analysis, allText, bestText, passes, cancelled: true };
       const { rot, mode } = plan[i];
       if (i > 0 && onStep) onStep(i + 1, plan.length);
-      const { data } = await worker.recognize(makeVariant(src, rot, mode, scale), {}, { text: true, blocks: true });
+      const variant = makeVariant(src, rot, mode, scale);
+      // Skip images too small for Tesseract (it aborts with "Image too small to scale").
+      if (variant.width < MIN_OCR_PX || variant.height < MIN_OCR_PX) break;
+      let data;
+      try {
+        ({ data } = await worker.recognize(variant, {}, { text: true, blocks: true }));
+      } catch (err) {
+        // One bad image must not stop the rest of the scan (other pages, pictures, files).
+        ocrSkipped(err);
+        reset().catch(() => {});                  // a crashed WASM worker is unusable: start fresh next time
+        break;
+      } finally {
+        variant.width = variant.height = 0;
+      }
       const text = (data && data.text) || '';
       passes.push({ rot, scale, w: Math.round(src.width * scale), h: Math.round(src.height * scale), words: psImageRedact.wordsFromTesseract(data) });
       const score = alnumCount(text) * ((data && data.confidence) || 0);
@@ -123,7 +168,7 @@ var psOcr = (() => {
       // Read cleanly and found nothing sensitive: the image is upright and simply not a document.
       if (((data && data.confidence) || 0) >= CONFIDENT && alnumCount(text) >= 20) break;
     }
-    return { analysis, allText, bestText, passes, cancelled: false };
+    return { analysis: analysis || psDocScan.analyze('', detect), allText, bestText, passes, cancelled: false };
   }
 
   /** Document label + human labels of every detected field / finding, in the UI language. */
@@ -175,7 +220,7 @@ var psOcr = (() => {
     }
   }
 
-  return { getWorker, loadBitmap, ocrImage, scanImage, describe, alnumCount };
+  return { getWorker, reset, loadBitmap, ocrImage, scanImage, describe, alnumCount };
 })();
 
 if (typeof globalThis !== 'undefined') globalThis.psOcr = psOcr;

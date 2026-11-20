@@ -10,6 +10,9 @@
 'use strict';
 
 (() => {
+  // DEBUG-gated log for OCR skipped on one image/page (error message only, never content).
+  const DEBUG = false;
+  const ocrSkipped = (err) => { if (DEBUG) console.debug('[PromptShield] OCR skipped:', (err && err.message) || err); };
   // Set this to the Chrome Web Store listing once published. Until then the install buttons
   // scroll to the "load unpacked" instructions on this page.
   const INSTALL_URL = '';
@@ -410,33 +413,38 @@ Rekening BCA: 1234567890`;
   // ── Photo redaction ──────────────────────────────────────────────────────
   // Photo redaction (local, Canvas API only): when any PII is detected, the WHOLE photo is
   // pixelated (mosaic). Simple and complete: no OCR box can be missed. Nothing leaves the browser.
-  const PIXEL_BLOCK = 14;               // block size for a ~1000px photo
-  const PIXEL_BLOCKS_ACROSS = 70;       // keep the same chunkiness on high-resolution photos
+  // Classic "censor mosaic": square blocks, one solid colour each (the block's average).
+  // Canvas-based (no CSS blur): shrink so each block becomes one pixel, then scale back up
+  // with smoothing off. Fixed 22 px blocks on every image; never below 18 px.
+  const MOSAIC_BLOCK = 22;
+  const MOSAIC_MIN_BLOCK = 18;
 
-  /**
-   * Mosaic: fill each blockSize×blockSize cell with the cell's average colour.
-   * Reads the region once (one getImageData) instead of once per cell, so big photos stay fast.
-   */
-  function pixelateRegion(ctx, x, y, w, h, blockSize = 12) {
-    x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
-    w = Math.min(ctx.canvas.width - x, Math.ceil(w)); h = Math.min(ctx.canvas.height - y, Math.ceil(h));
-    if (w <= 0 || h <= 0) return;
-    const bs = Math.max(2, Math.round(blockSize));
-    const img = ctx.getImageData(x, y, w, h);
-    const d = img.data;
-    for (let by = 0; by < h; by += bs) {
-      const bh = Math.min(bs, h - by);
-      for (let bx = 0; bx < w; bx += bs) {
-        const bw = Math.min(bs, w - bx);
-        let r = 0, g = 0, b = 0;
-        for (let yy = by; yy < by + bh; yy++) {
-          for (let xx = bx, i = (yy * w + bx) * 4; xx < bx + bw; xx++, i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-        }
-        const n = bw * bh;
-        ctx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
-        ctx.fillRect(x + bx, y + by, bw, bh);
-      }
-    }
+  /** Pixelate the WHOLE canvas in place. blockSize is clamped to >= MOSAIC_MIN_BLOCK. */
+  function pixelateCanvas(canvas, blockSize = MOSAIC_BLOCK) {
+    const w = canvas.width, h = canvas.height;
+    if (!w || !h) return canvas;
+    const bs = Math.max(MOSAIC_MIN_BLOCK, Math.round(blockSize) || MOSAIC_BLOCK);
+    const ctx = canvas.getContext('2d');
+    const smallW = Math.ceil(w / bs), smallH = Math.ceil(h / bs);
+
+    // Step 1: shrunken copy, one pixel per block (the downscale averages the block's pixels).
+    const off = document.createElement('canvas');
+    off.width = smallW;
+    off.height = smallH;
+    const offCtx = off.getContext('2d');
+    offCtx.imageSmoothingEnabled = true;
+    offCtx.imageSmoothingQuality = 'high';
+    offCtx.drawImage(canvas, 0, 0, smallW, smallH);
+
+    // Step 2: back at full size, no smoothing = solid square blocks. Clear first so a
+    // semi-transparent block (PNG with alpha) can never show the original through it.
+    ctx.save();
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, smallW, smallH, 0, 0, w, h);
+    ctx.restore();
+    off.width = off.height = 0;
+    return canvas;
   }
 
   /**
@@ -451,8 +459,7 @@ Rekening BCA: 1234567890`;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(source, 0, 0);
     if (!((findings && findings.length > 0) || docType)) return { canvas, boxes: 0 };
-    const block = Math.max(PIXEL_BLOCK, Math.round(Math.max(canvas.width, canvas.height) / PIXEL_BLOCKS_ACROSS));
-    pixelateRegion(ctx, 0, 0, canvas.width, canvas.height, block);
+    pixelateCanvas(canvas, MOSAIC_BLOCK);
     return { canvas, boxes: 1 };
   }
 
@@ -532,6 +539,7 @@ Rekening BCA: 1234567890`;
 
   // ── OCR (same multi-pass pipeline as the extension's side panel) ────────
   const OCR_TARGET_PX = 2400;
+  const MIN_OCR_PX = 50;                 // smaller images are skipped: Tesseract cannot read them
   const OCR_PASSES = [
     { rot: 0, mode: 'gray' },
     { rot: 90, mode: 'gray' },
@@ -579,14 +587,26 @@ Rekening BCA: 1234567890`;
 
   /** Run OCR passes on a bitmap/canvas until something sensitive is found or the text reads cleanly. */
   async function ocrAnalyze(source, setStatus, passes) {
-    const worker = await getWorker();
     const list = passes || OCR_PASSES;
     let text = '';
     let analysis = psDocScan.analyze('', psDetectAll);
     let empty = 0;
+    // Skip images too small for Tesseract (it aborts with "Image too small to scale").
+    if (!source || (source.width || 0) < MIN_OCR_PX || (source.height || 0) < MIN_OCR_PX) return { text, analysis };
+    const worker = await getWorker();
     for (let i = 0; i < list.length; i++) {
       if (i > 0 && setStatus) setStatus(S().ocr_step(i + 1, list.length));
-      const { data } = await worker.recognize(makeVariant(source, list[i].rot, list[i].mode));
+      const variant = makeVariant(source, list[i].rot, list[i].mode);
+      if (variant.width < MIN_OCR_PX || variant.height < MIN_OCR_PX) break;
+      let data;
+      try {
+        ({ data } = await worker.recognize(variant));
+      } catch (err) {
+        ocrSkipped(err);
+        workerPromise = null;                       // a crashed worker is unusable: start fresh next time
+        try { worker.terminate(); } catch (_) { /* already gone */ }
+        break;
+      }
       const t = (data && data.text) || '';
       text += '\n' + t;
       analysis = psDocScan.analyze(text, psDetectAll);

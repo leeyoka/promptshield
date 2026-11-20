@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PromptShield · Energi</title>
+  <title>Estimasi Efisiensi Energi PromptShield</title>
   <meta name="description" content="Kenapa PromptShield menyarankan model AI yang lebih kecil: estimasi energi per prompt, rumus penghematan, dan sumber datanya.">
   <meta name="color-scheme" content="light">
   <link rel="icon" href="assets/logo.png" type="image/png">
@@ -145,6 +145,14 @@
     .plain svg { width: 44px; height: 44px; color: #ca8a04; }
     .plain p { margin: 0; font-size: 17px; line-height: 1.7; }
 
+    .bars-vs .bar-row, .bars-vs .axis { grid-template-columns: 190px 1fr; }
+    @media (max-width: 479px) { .bars-vs .bar-row, .bars-vs .axis { grid-template-columns: 1fr; } }
+    .bars-vs .bar-range { left: 0; min-width: 64px; }
+    .vs-note { margin: 14px 0 0; font-size: 14px; color: var(--fg-3); }
+    .plain-text p + p { margin-top: 10px; }
+    footer a { color: #ddd; }
+    footer p { margin: 0; }
+    footer p + p { margin-top: 8px; }
     .footnote { text-align: center; font-size: 13px; color: var(--fg-3); margin: 8px auto 48px; max-width: 60ch; }
     footer { background: #0f0f0f; color: #888; padding: 32px 24px; text-align: center; font: 400 13px/1.5 var(--sans); }
   </style>
@@ -172,7 +180,7 @@
   <main>
     <div class="hero wrap narrow">
       <p class="pill" data-i18n="tag">Right-size · Energi</p>
-      <h1 data-i18n-html="title">Model yang <em>cukup</em>, bukan yang terbesar.</h1>
+      <h1 data-i18n-html="title">Estimasi Efisiensi Energi <em>PromptShield</em></h1>
       <p class="lead" data-i18n="lead">Selain melindungi data, PromptShield menyarankan model AI yang lebih kecil saat tugasmu sederhana. Halaman ini menjelaskan angka dan rumus di balik saran itu.</p>
     </div>
 
@@ -185,6 +193,30 @@
           <p data-i18n-html="fact_body">Satu prompt teks median ke Gemini memakai <strong>~0,24 Wh</strong> energi. Mengirim tugas ringan ke model besar padahal model kecil sudah cukup membuang energi, dan itu bertambah besar di jutaan pengguna.</p>
           <p class="cite"><span data-i18n="source">Sumber:</span> Google — Elsworth et al., <a href="https://arxiv.org/abs/2508.15734" target="_blank" rel="noopener"><cite>Measuring the environmental impact of delivering AI at Google Scale</cite></a> (arXiv:2508.15734, Agustus 2025), <span data-i18n="source_note">median prompt teks Gemini Apps. Dikutip dalam riset PromptShield.</span></p>
         </div>
+      </div>
+    </section>
+
+    <!-- a2) With vs without PromptShield -->
+    <section class="wrap narrow" aria-labelledby="vs-title">
+      <h2 id="vs-title" data-i18n="vs_title">Tanpa vs dengan PromptShield</h2>
+      <p class="sub" data-i18n="vs_sub">Estimasi energi untuk satu prompt ringan (Wh).</p>
+      <div class="card">
+        <div class="bars bars-vs" role="img" data-i18n-aria="vs_aria" aria-label="Estimasi: prompt tanpa PromptShield 0,24 Wh, prompt dengan PromptShield 0,07 Wh.">
+          <!-- Scale 0–0.3 Wh: width% = value / 0.3 * 100 -->
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="vs_without">Prompt tanpa PromptShield</span>
+            <div class="bar-track"><span class="bar-range t-large" style="width:80%">0,24 Wh</span></div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="vs_with">Prompt dengan PromptShield</span>
+            <div class="bar-track"><span class="bar-range t-small" style="width:23.3%">0,07 Wh</span></div>
+          </div>
+          <div class="axis" aria-hidden="true">
+            <span></span>
+            <div class="axis-scale"><span style="left:0">0</span><span style="left:33.3%">0,1</span><span style="left:66.7%">0,2</span><span style="left:100%">0,3 Wh</span></div>
+          </div>
+        </div>
+        <p class="vs-note" data-i18n-html="vs_note"><strong>Estimasi.</strong> 0,24 Wh = median satu prompt teks ke model besar (Google, 2025). 0,07 Wh = titik tengah estimasi model kecil (0,05–0,10 Wh, asumsi tim PromptShield), berlaku saat kamu menerima saran model kecil untuk tugas ringan.</p>
       </div>
     </section>
 
@@ -233,15 +265,16 @@
       <h2 id="formula-title" data-i18n="formula_title">Rumus yang kami pakai</h2>
       <p class="sub" data-i18n="formula_sub">Terbuka dan sederhana, supaya kamu bisa memeriksanya sendiri.</p>
       <div class="card">
-        <div class="formula" role="math" aria-label="Energi hemat per saran yang diterima kira-kira sama dengan E besar dikurangi E kecil">
-          <span data-i18n="formula_lhs">Energi hemat per saran diterima</span> <span class="op">≈</span> E<sub data-i18n="sub_large">besar</sub> <span class="op">−</span> E<sub data-i18n="sub_small">kecil</sub>
+        <div class="formula" role="math" aria-label="E hemat sama dengan E besar dikurangi E kecil">
+          E<sub data-i18n="sub_saved">hemat</sub> <span class="op">=</span> E<sub data-i18n="sub_large">besar</sub> <span class="op">−</span> E<sub data-i18n="sub_small">kecil</sub>
         </div>
         <ul class="defs">
-          <li data-i18n-html="def_large"><strong>E<sub>besar</sub></strong>: estimasi energi satu prompt di model besar (model bawaan yang biasanya dipakai situs chat).</li>
-          <li data-i18n-html="def_small"><strong>E<sub>kecil</sub></strong>: estimasi energi prompt yang sama di model kecil yang disarankan.</li>
+          <li data-i18n-html="def_saved"><strong>E<sub>hemat</sub></strong>: estimasi energi yang dihemat per saran model kecil yang kamu terima.</li>
+          <li data-i18n-html="def_large"><strong>E<sub>besar</sub></strong>: energi satu prompt ke model AI besar, rata-rata <strong>~0,24 Wh</strong> per prompt (estimasi; median Google, 2025).</li>
+          <li data-i18n-html="def_small"><strong>E<sub>kecil</sub></strong>: energi prompt yang sama di model kecil, <strong>~0,05–0,10 Wh</strong> (estimasi; asumsi tim PromptShield).</li>
           <li data-i18n="def_accept">Hanya dihitung saat kamu menerima saran. Kalau kamu memang sudah memakai model kecil, penghematannya ≈ 0.</li>
         </ul>
-        <p class="example" data-i18n-html="example">Contoh dengan angka di tabel: <code>(0,2–0,4) − (0,05–0,1) ≈ 0,1–0,35 Wh</code> per saran yang diterima.</p>
+        <p class="example" data-i18n-html="example">Contoh: <code>0,24 − 0,07 ≈ 0,17 Wh</code> per saran yang diterima (estimasi). Dengan rentang di tabel: <code>(0,2–0,4) − (0,05–0,1) ≈ 0,1–0,35 Wh</code>.</p>
       </div>
     </section>
 
@@ -252,7 +285,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0012 3z"/>
         </svg>
-        <p data-i18n="plain_body">Bayangkan listrik untuk satu prompt besar seperti menyalakan lampu LED selama beberapa menit. Kalau ribuan orang melakukan ini setiap hari, totalnya sangat besar. PromptShield menyarankan model yang cukup untuk tugasmu — hemat energi, hasil tetap baik.</p>
+        <div class="plain-text">
+          <p data-i18n="plain_why">Kenapa ukuran berpengaruh? Setiap prompt dijalankan di server pusat data. Makin besar model AI-nya dan makin panjang teks yang harus dibaca dan ditulis, makin banyak perhitungan yang dibutuhkan, dan makin banyak listrik yang terpakai. Satu prompt ke model besar memang kecil (sekitar menyalakan lampu LED beberapa menit), tapi dikali jutaan prompt setiap hari, totalnya sangat besar.</p>
+          <p data-i18n="plain_how">Bagaimana PromptShield membantu? Saat tugasmu ringan (menerjemahkan, meringkas teks pendek, memperbaiki salah ketik), PromptShield menyarankan model yang lebih kecil, yang cukup untuk tugas itu dan butuh energi jauh lebih sedikit. Penyamaran data sensitif sendiri tidak menghemat energi secara berarti: nilai asli diganti penanda singkat, jadi panjang prompt hampir sama. Yang dilindunginya adalah privasimu; penghematan energinya datang dari saran model.</p>
+          <p data-i18n="plain_disclaimer">Catatan penting: semua angka di halaman ini adalah estimasi dari data yang dipublikasikan, bukan pengukuran langsung. Energi sebenarnya bergantung pada model, panjang jawaban, perangkat keras, dan pusat data penyedia AI.</p>
+        </div>
       </div>
     </section>
 
@@ -260,7 +297,10 @@
     <p class="footnote wrap" data-i18n="footnote">Semua estimasi berdasarkan data publik. PromptShield tidak mengukur konsumsi energi secara langsung.</p>
   </main>
 
-  <footer data-i18n="footer_copy">© 2025 PromptShield · Team Open Minded · Techtonic 3.0</footer>
+  <footer>
+    <p><a href="./" data-i18n="back_home">← Kembali ke halaman utama PromptShield</a></p>
+    <p data-i18n="footer_copy">© 2025 PromptShield · Team Open Minded · Techtonic 3.0</p>
+  </footer>
 
   <script>
     (() => {
@@ -271,7 +311,19 @@
         nav_energy: 'Energy',
         nav_cta: 'Add to Chrome',
         tag: 'Right-size · Energy',
-        title: 'The model that is <em>enough</em>, not the biggest.',
+        title: 'PromptShield <em>energy efficiency</em> estimate',
+        vs_title: 'Without vs with PromptShield',
+        vs_sub: 'Estimated energy for one light prompt (Wh).',
+        vs_aria: 'Estimate: prompt without PromptShield 0.24 Wh, prompt with PromptShield 0.07 Wh.',
+        vs_without: 'Prompt without PromptShield',
+        vs_with: 'Prompt with PromptShield',
+        vs_note: '<strong>Estimate.</strong> 0.24 Wh = median text prompt to a large model (Google, 2025). 0.07 Wh = midpoint of the small-model estimate (0.05–0.10 Wh, PromptShield team assumption), when you accept the smaller-model suggestion for a light task.',
+        sub_saved: 'saved',
+        def_saved: '<strong>E<sub>saved</sub></strong>: estimated energy saved per accepted smaller-model suggestion.',
+        plain_why: 'Why does size matter? Every prompt runs on servers in a data centre. The bigger the AI model and the more text it has to read and write, the more computation it needs and the more electricity it uses. One prompt to a large model is small (roughly an LED bulb on for a few minutes), but multiplied by millions of prompts a day the total is very large.',
+        plain_how: 'How does PromptShield help? When your task is light (translating, summarising short text, fixing typos), PromptShield suggests a smaller model that is enough for it and needs far less energy. Masking sensitive data does not save meaningful energy by itself: real values are replaced by short placeholders, so the prompt is about as long. Masking protects your privacy; the energy saving comes from the model suggestion.',
+        plain_disclaimer: 'Important: every number on this page is an estimate from published data, not a direct measurement. Real energy depends on the model, answer length, hardware and the AI provider’s data centre.',
+        back_home: '← Back to the PromptShield home page',
         lead: 'Besides protecting your data, PromptShield suggests a smaller AI model when your task is simple. This page explains the numbers and the formula behind that suggestion.',
         fact_title: 'The core fact',
         fact_body: 'A single median text prompt to Gemini uses <strong>~0.24 Wh</strong>. Sending a light task to a large model when a small one suffices wastes energy, and that adds up across millions of users.',
@@ -289,17 +341,15 @@
         estimate_note: 'These are estimates based on published data, not measurements. Real energy depends on answer length, hardware and the provider’s data centre.',
         formula_title: 'The formula we use',
         formula_sub: 'Open and simple, so you can check it yourself.',
-        formula_lhs: 'Energy saved per accepted suggestion',
         sub_large: 'large', sub_small: 'small',
-        def_large: '<strong>E<sub>large</sub></strong>: estimated energy of one prompt on a large model (the default most chat sites use).',
-        def_small: '<strong>E<sub>small</sub></strong>: estimated energy of the same prompt on the suggested small model.',
+        def_large: '<strong>E<sub>large</sub></strong>: energy of one prompt to a large AI model, on average <strong>~0.24 Wh</strong> per prompt (estimate; Google median, 2025).',
+        def_small: '<strong>E<sub>small</sub></strong>: energy of the same prompt on a small model, <strong>~0.05–0.10 Wh</strong> (estimate; PromptShield team assumption).',
         def_accept: 'Only counted when you accept the suggestion. If you already use a small model, the saving is ≈ 0.',
-        example: 'Example with the table’s numbers: <code>(0.2–0.4) − (0.05–0.1) ≈ 0.1–0.35 Wh</code> per accepted suggestion.',
+        example: 'Example: <code>0.24 − 0.07 ≈ 0.17 Wh</code> per accepted suggestion (estimate). With the table’s ranges: <code>(0.2–0.4) − (0.05–0.1) ≈ 0.1–0.35 Wh</code>.',
         plain_title: 'In plain words',
-        plain_body: 'Think of the electricity for one large prompt as keeping an LED bulb on for a few minutes. When thousands of people do this every day, the total is very large. PromptShield suggests the model that is enough for your task: less energy, same good result.',
         footnote: 'All estimates are based on public data. PromptShield does not measure energy use directly.',
         footer_copy: '© 2025 PromptShield · Team Open Minded · Techtonic 3.0',
-        doc_title: 'PromptShield · Energy'
+        doc_title: 'PromptShield energy efficiency estimate'
       };
       // Snapshot the Indonesian markup so switching back restores it.
       const ID = { doc_title: document.title };

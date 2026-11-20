@@ -1,7 +1,7 @@
 // PromptShield photo redaction helpers: locate detected values in OCR word boxes, and pixelate
 // selected regions of a canvas. Used by the side panel (locating) and the content script
 // (per-finding pixelation after the user picks what to mask). Pure, apart from the canvas
-// drawing in psPixelateRegion. No network, no chrome APIs.
+// drawing in pixelateCanvas. No network, no chrome APIs.
 'use strict';
 
 var psImageRedact = (() => {
@@ -97,40 +97,41 @@ var psImageRedact = (() => {
     });
   }
 
-  /** Mosaic: fill each blockSize×blockSize cell with its average colour (one getImageData per region). */
-  function pixelateRegion(ctx, x, y, w, h, blockSize = 12) {
-    x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
-    w = Math.min(ctx.canvas.width - x, Math.ceil(w)); h = Math.min(ctx.canvas.height - y, Math.ceil(h));
-    if (w <= 0 || h <= 0) return;
-    const bs = Math.max(2, Math.round(blockSize));
-    const img = ctx.getImageData(x, y, w, h);
-    const d = img.data;
-    for (let by = 0; by < h; by += bs) {
-      const bh = Math.min(bs, h - by);
-      for (let bx = 0; bx < w; bx += bs) {
-        const bw = Math.min(bs, w - bx);
-        let r = 0, g = 0, b = 0;
-        for (let yy = by; yy < by + bh; yy++) {
-          for (let xx = bx, i = (yy * w + bx) * 4; xx < bx + bw; xx++, i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-        }
-        const n = bw * bh;
-        ctx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
-        ctx.fillRect(x + bx, y + by, bw, bh);
-      }
-    }
+  // Classic "censor mosaic": square blocks, one solid colour each (the block's average).
+  // Canvas-based (no CSS blur): shrink so each block becomes one pixel, then scale back up
+  // with smoothing off. Fixed 22 px blocks on every image; never below 18 px.
+  const MOSAIC_BLOCK = 22;
+  const MOSAIC_MIN_BLOCK = 18;
+
+  /** Pixelate the WHOLE canvas in place. blockSize is clamped to >= MOSAIC_MIN_BLOCK. */
+  function pixelateCanvas(canvas, blockSize = MOSAIC_BLOCK) {
+    const w = canvas.width, h = canvas.height;
+    if (!w || !h) return canvas;
+    const bs = Math.max(MOSAIC_MIN_BLOCK, Math.round(blockSize) || MOSAIC_BLOCK);
+    const ctx = canvas.getContext('2d');
+    const smallW = Math.ceil(w / bs), smallH = Math.ceil(h / bs);
+
+    // Step 1: shrunken copy, one pixel per block (the downscale averages the block's pixels).
+    const off = document.createElement('canvas');
+    off.width = smallW;
+    off.height = smallH;
+    const offCtx = off.getContext('2d');
+    offCtx.imageSmoothingEnabled = true;
+    offCtx.imageSmoothingQuality = 'high';
+    offCtx.drawImage(canvas, 0, 0, smallW, smallH);
+
+    // Step 2: back at full size, no smoothing = solid square blocks. Clear first so a
+    // semi-transparent block (PNG with alpha) can never show the original through it.
+    ctx.save();
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, smallW, smallH, 0, 0, w, h);
+    ctx.restore();
+    off.width = off.height = 0;
+    return canvas;
   }
 
-  /** Block size that stays unreadable on any resolution. */
-  function blockSizeFor(imgW, imgH) {
-    return Math.max(14, Math.round(Math.max(imgW, imgH) / 70));
-  }
-
-  /** Mask block for a single box: at least ~2 blocks tall so a line of text is never readable. */
-  function blockSizeForBox(box, imgW, imgH) {
-    return Math.max(6, Math.min(blockSizeFor(imgW, imgH), Math.round(box.h / 2)));
-  }
-
-  return { matchKey, wordsFromTesseract, locateValue, mapBoxToSource, padBox, locateFindings, pixelateRegion, blockSizeFor, blockSizeForBox };
+  return { matchKey, wordsFromTesseract, locateValue, mapBoxToSource, padBox, locateFindings, pixelateCanvas, MOSAIC_BLOCK, MOSAIC_MIN_BLOCK };
 })();
 
 if (typeof globalThis !== 'undefined') globalThis.psImageRedact = psImageRedact;

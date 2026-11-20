@@ -9,7 +9,7 @@
 
   const STR = {
     id: {
-      sub: 'Otomatis di chatgpt.com · foto & PDF juga di web.whatsapp.com · situs lain lewat panel samping',
+      sub: 'Otomatis di chatgpt.com · foto, PDF & Word juga di web.whatsapp.com · situs lain lewat panel samping',
       openPanel: 'Buka panel samping (semua situs)', panelFail: 'Panel samping tidak bisa dibuka di jendela ini. Coba pintasan Alt+Shift+P.',
       tabOverview: 'Ringkasan', tabTry: 'Coba', tabSettings: 'Pengaturan',
       protected: 'data sensitif disamarkan', last7: '7 hari terakhir',
@@ -29,7 +29,7 @@
       bigLarge: 'Prompt ini kemungkinan butuh model besar.'
     },
     en: {
-      sub: 'Automatic on chatgpt.com · photos & PDFs also on web.whatsapp.com · any other site via the side panel',
+      sub: 'Automatic on chatgpt.com · photos, PDFs & Word files also on web.whatsapp.com · any other site via the side panel',
       openPanel: 'Open side panel (any site)', panelFail: 'Could not open the side panel in this window. Try the Alt+Shift+P shortcut.',
       tabOverview: 'Overview', tabTry: 'Try', tabSettings: 'Settings',
       protected: 'sensitive items masked', last7: 'last 7 days',

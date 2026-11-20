@@ -34,11 +34,38 @@ async function scanPdf(msg) {
   return { success: true, ...r };
 }
 
+async function scanDocx(msg) {
+  const s = msg.settings || {};
+  const r = await psDocxScan.scan(String(msg.dataUrl || ''), {
+    enabledTypes: s.enabledTypes,
+    confidenceThreshold: s.confidenceThreshold,
+    lang: s.lang
+  });
+  return { success: true, ...r };
+}
+
+const HANDLERS = { PS_OFFSCREEN_SCAN_IMAGE: scanImage, PS_OFFSCREEN_SCAN_PDF: scanPdf, PS_OFFSCREEN_SCAN_DOCX: scanDocx };
+
+// Watchdog: scans run one at a time, so one that hangs (e.g. a stuck OCR worker) would block every
+// scan after it and leave the page's "scanning…" dialog up forever. Past the limit the scan fails,
+// the OCR worker is replaced, and the queue moves on.
+const LIMIT_MS = { PS_OFFSCREEN_SCAN_IMAGE: 55000, PS_OFFSCREEN_SCAN_PDF: 540000, PS_OFFSCREEN_SCAN_DOCX: 540000 };
+function withWatchdog(type, run) {
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      psOcr.reset().catch(() => {});
+      reject(new Error('scan_timeout'));
+    }, LIMIT_MS[type] || 120000);
+  });
+  return Promise.race([run(), limit]).finally(() => clearTimeout(timer));
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || sender.tab || sender.id !== chrome.runtime.id) return false;
-  const fn = msg.type === 'PS_OFFSCREEN_SCAN_IMAGE' ? scanImage : msg.type === 'PS_OFFSCREEN_SCAN_PDF' ? scanPdf : null;
+  const fn = Object.prototype.hasOwnProperty.call(HANDLERS, msg.type) ? HANDLERS[msg.type] : null;
   if (!fn) return false;
-  serial(() => fn(msg))
+  serial(() => withWatchdog(msg.type, () => fn(msg)))
     .then(sendResponse, (e) => sendResponse({ success: false, error: (e && e.message) || 'scan_failed' }));
   return true;
 });

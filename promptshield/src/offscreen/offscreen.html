@@ -2,10 +2,11 @@
 <html>
 <head><meta charset="utf-8"><title>PromptShield scanner</title></head>
 <body>
-  <!-- Hidden page (chrome.offscreen) that runs on-device OCR + PDF scans for the upload guard. -->
+  <!-- Hidden page (chrome.offscreen) that runs on-device OCR + PDF / Word scans for the upload guard. -->
   <script src="../../lib/tesseract.min.js"></script>
   <script src="../../lib/pdfjs/pdf.min.js"></script>
   <script src="../../lib/pdfjs/pdf.worker.min.js"></script>
+  <script src="../../lib/jszip/jszip.min.js"></script>
   <script src="../shared/constants.js"></script>
   <script src="../shared/detectors.js"></script>
   <script src="../shared/masker.js"></script>
@@ -13,6 +14,7 @@
   <script src="../shared/image-redact.js"></script>
   <script src="../shared/ocr-engine.js"></script>
   <script src="../shared/pdf-scan.js"></script>
+  <script src="../shared/docx-scan.js"></script>
   <script src="offscreen.js"></script>
 </body>
 </html>

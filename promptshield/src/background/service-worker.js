@@ -99,12 +99,46 @@ async function ensureOffscreen() {
     offscreenCreating = chrome.offscreen.createDocument({
       url: OFFSCREEN_URL,
       reasons: ['WORKERS'],
-      justification: 'On-device OCR (Tesseract.js web worker) and PDF scanning of files before they are uploaded.'
+      justification: 'On-device OCR (Tesseract.js web worker) and PDF / Word scanning of files before they are uploaded.'
     }).catch((e) => {
       if (!/single offscreen|already/i.test((e && e.message) || '')) throw e;   // created meanwhile
     }).finally(() => { offscreenCreating = null; });
   }
   await offscreenCreating;
+}
+
+// Chrome stops an idle extension service worker after ~30 s, and waiting on the offscreen OCR does
+// not count as activity. A stopped worker drops the page's reply channel, so the page would never get
+// its result. While any upload scan runs, a cheap extension API call every 20 s keeps it alive.
+let activeScans = 0;
+let keepAliveTimer = null;
+function scanStarted() {
+  if (activeScans++ === 0) keepAliveTimer = setInterval(() => { chrome.runtime.getPlatformInfo(() => {}); }, 20000);
+}
+function scanEnded() {
+  activeScans = Math.max(0, activeScans - 1);
+  if (activeScans === 0 && keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
+/**
+ * Tell an open side panel about an upload scan done for a page, so it lists the same findings.
+ * Types, partial values (e.g. 3171********0002) and where each was found only; never full values.
+ */
+function notifyPanel(kind, fileName, site, res) {
+  const r = res || {};
+  const findings = (r.findings || []).map((f) => ({
+    type: f.type,
+    display: psMasker.partialValue(f.value),
+    confidence: f.confidence,
+    sources: Array.isArray(f.sources) && f.sources.length ? f.sources : ['image']
+  }));
+  chrome.runtime.sendMessage({
+    type: 'PS_UPLOAD_SCAN_RESULT',
+    kind, site,
+    fileName: String(fileName || '').slice(0, 120),
+    success: !!r.success, hasPII: !!r.hasPII, error: r.success ? null : (r.error || 'scan_failed'),
+    findings, at: Date.now()
+  }).catch(() => { /* no side panel open: nobody is listening */ });
 }
 
 async function scanInOffscreen(payload) {
@@ -131,28 +165,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((e) => { dlog('side panel open failed', e && e.message); sendResponse({ success: false, error: 'panel_open_failed' }); });
     return true;
   }
-  if (message && (message.type === 'SCAN_IMAGE_FOR_PII' || message.type === 'SCAN_PDF_FOR_PII')) {
+  // Page message -> offscreen handler, and the data: URL shape each one accepts.
+  const UPLOAD_SCANS = {
+    SCAN_IMAGE_FOR_PII: { kind: 'image', to: 'PS_OFFSCREEN_SCAN_IMAGE', re: /^data:image\/[a-z0-9.+-]+;base64,/i, bad: 'bad_image', log: 'image scan' },
+    SCAN_PDF_FOR_PII: { kind: 'pdf', to: 'PS_OFFSCREEN_SCAN_PDF', re: /^data:[^,]*;base64,/i, bad: 'bad_pdf', log: 'pdf scan' },
+    SCAN_DOCX_FOR_PII: { kind: 'docx', to: 'PS_OFFSCREEN_SCAN_DOCX', re: /^data:[^,]*;base64,/i, bad: 'bad_docx', log: 'docx scan' }
+  };
+  const uploadScan = message && Object.prototype.hasOwnProperty.call(UPLOAD_SCANS, message.type) ? UPLOAD_SCANS[message.type] : null;
+  if (uploadScan) {
     if (!sender.tab) { sendResponse({ success: false, error: 'no_tab' }); return false; }
-    const isPdf = message.type === 'SCAN_PDF_FOR_PII';
     const dataUrl = String(message.dataUrl || '');
-    if (isPdf ? !/^data:[^,]*;base64,/i.test(dataUrl) : !/^data:image\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
-      sendResponse({ success: false, error: isPdf ? 'bad_pdf' : 'bad_image' });
+    if (!uploadScan.re.test(dataUrl)) {
+      sendResponse({ success: false, error: uploadScan.bad });
       return false;
     }
+    let site = '';
+    try { site = new URL(sender.tab.url || sender.url || '').hostname; } catch (_) { site = ''; }
+    scanStarted();
     (async () => {
       const settings = await getSettings();
       const lang = message.lang === 'en' || message.lang === 'id' ? message.lang : settings.lang;   // the page's resolved UI language
       const res = await scanInOffscreen({
-        type: isPdf ? 'PS_OFFSCREEN_SCAN_PDF' : 'PS_OFFSCREEN_SCAN_IMAGE',
+        type: uploadScan.to,
         dataUrl,
         lang,
         settings: { enabledTypes: settings.enabledTypes, confidenceThreshold: settings.confidenceThreshold, lang }
       });
-      dlog(isPdf ? 'pdf scan' : 'image scan', res && { success: res.success, hasPII: res.hasPII, findings: (res.findings || []).length });
+      dlog(uploadScan.log, res && { success: res.success, hasPII: res.hasPII, findings: (res.findings || []).length });
       return res;
     })()
-      .then(sendResponse)
-      .catch((e) => sendResponse({ success: false, error: (e && e.message) || 'scan_failed' }));
+      .catch((e) => ({ success: false, error: (e && e.message) || 'scan_failed' }))
+      .then((res) => {
+        sendResponse(res);                                   // the page's popup
+        notifyPanel(uploadScan.kind, message.fileName, site, res);   // and the side panel, if open
+      })
+      .finally(scanEnded);
     return true;
   }
   if (message && /^PS_OFFSCREEN_/.test(message.type || '')) return false;   // meant for the offscreen page

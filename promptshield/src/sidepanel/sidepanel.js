@@ -606,9 +606,9 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   const SCAN_STR = {
     id: {
       scanTitle: 'Pindai dokumen foto',
-      scanHint: 'Jatuhkan atau pilih foto dokumen (KTP, Paspor, KK, SIM, BPJS, Buku Rekening, dll.) atau PDF untuk memeriksa data sensitif di dalamnya.',
-      scanDrop: 'Jatuhkan foto/PDF di sini atau klik untuk memilih',
-      scanDropSub: 'JPG / PNG / WEBP / PDF',
+      scanHint: 'Jatuhkan atau pilih foto dokumen (KTP, Paspor, KK, SIM, BPJS, Buku Rekening, dll.), PDF, atau dokumen Word (.docx) untuk memeriksa data sensitif di dalamnya.',
+      scanDrop: 'Jatuhkan foto/PDF/Word di sini atau klik untuk memilih',
+      scanDropSub: 'JPG / PNG / WEBP / PDF / DOCX',
       pdfScanning: (p, n) => `Membaca teks & memindai halaman ${p}/${n} (OCR)… (proses lokal)`,
       pdfWarnBody: 'Jangan unggah PDF ini ke AI. Data sensitif ditemukan lewat teks PDF dan/atau OCR halaman.',
       pdfOkBody: 'Tidak ada data sensitif yang terdeteksi, baik di teks PDF maupun lewat OCR halamannya.',
@@ -616,7 +616,14 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
       pdfErr: 'PDF tidak bisa dibaca (mungkin terkunci, rusak, atau terlalu besar).',
       pdfDownload: '⬇ Download versi teks aman (.txt)',
       pdfOcrLimit: (n) => `OCR hanya untuk ${n} halaman pertama; halaman berikutnya diperiksa lewat teksnya saja.`,
-      srcText: 'teks', srcOcr: 'OCR',
+      docxScanning: (i, n) => n ? `Membaca teks & memindai gambar ${i}/${n} (OCR)… (proses lokal)` : 'Membaca teks dokumen Word… (proses lokal)',
+      docxTitle: '⚠️ Data sensitif terdeteksi di dokumen Word',
+      docxWarnBody: 'Jangan unggah dokumen ini ke AI. Data sensitif ditemukan di teks dokumen dan/atau lewat OCR gambar di dalamnya.',
+      docxOkBody: 'Tidak ada data sensitif yang terdeteksi, baik di teks dokumen maupun lewat OCR gambarnya.',
+      docxNoText: 'Teks tidak terbaca dari dokumen Word ini (teks maupun OCR gambar).',
+      docxErr: 'Dokumen Word tidak bisa dibaca (mungkin terkunci, rusak, atau terlalu besar). Format .doc lama tidak didukung.',
+      docxImgLimit: (n) => `${n} gambar tidak bisa dipindai (format EMF/WMF/TIFF, terlalu besar, atau di atas batas). Periksa gambar itu secara manual.`,
+      srcText: 'teks', srcOcr: 'gambar',
       scanScanning: 'Membaca teks dari foto… (proses lokal, tidak ada data dikirim)',
       onDevice: 'Diproses 100% di perangkat kamu · tanpa API · tanpa internet',
       warnBody: 'Jangan unggah foto ini ke AI. Data sensitif di dalamnya bisa terbaca oleh model.',
@@ -631,9 +638,9 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     },
     en: {
       scanTitle: 'Scan document photo',
-      scanHint: 'Drop or choose a document photo (KTP, Passport, KK, SIM, BPJS, Bank Passbook, etc.) or a PDF to check for sensitive data.',
-      scanDrop: 'Drop a photo/PDF here or click to choose',
-      scanDropSub: 'JPG / PNG / WEBP / PDF',
+      scanHint: 'Drop or choose a document photo (KTP, Passport, KK, SIM, BPJS, Bank Passbook, etc.), a PDF or a Word document (.docx) to check for sensitive data.',
+      scanDrop: 'Drop a photo/PDF/Word file here or click to choose',
+      scanDropSub: 'JPG / PNG / WEBP / PDF / DOCX',
       pdfScanning: (p, n) => `Reading text & scanning page ${p}/${n} (OCR)… (local processing)`,
       pdfWarnBody: 'Do not upload this PDF to an AI. Sensitive data was found in its text and/or by OCR of its pages.',
       pdfOkBody: 'No sensitive data detected, neither in the PDF text nor by OCR of its pages.',
@@ -641,7 +648,14 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
       pdfErr: 'Could not read this PDF (it may be locked, damaged or too large).',
       pdfDownload: '⬇ Download safe text version (.txt)',
       pdfOcrLimit: (n) => `OCR covers the first ${n} pages; later pages are checked through their text only.`,
-      srcText: 'text', srcOcr: 'OCR',
+      docxScanning: (i, n) => n ? `Reading text & scanning image ${i}/${n} (OCR)… (local processing)` : 'Reading the Word document text… (local processing)',
+      docxTitle: '⚠️ Sensitive data detected in Word document',
+      docxWarnBody: 'Do not upload this document to an AI. Sensitive data was found in its text and/or by OCR of its images.',
+      docxOkBody: 'No sensitive data detected, neither in the document text nor by OCR of its images.',
+      docxNoText: 'No text could be read from this Word document (text or image OCR).',
+      docxErr: 'Could not read this Word document (it may be locked, damaged or too large). Old .doc files are not supported.',
+      docxImgLimit: (n) => `${n} image(s) could not be scanned (EMF/WMF/TIFF, too large, or over the limit). Check them by hand.`,
+      srcText: 'text', srcOcr: 'image',
       scanScanning: 'Reading text from photo… (local processing, nothing is sent anywhere)',
       onDevice: '100% on-device · no API · no internet needed',
       warnBody: 'Do not upload this photo to an AI. The sensitive data inside can be read by the model.',
@@ -698,33 +712,38 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
   // ── Photo redaction ─────────────────────────────────────────────────────────
   // Photo redaction (local, Canvas API only): when any PII is detected, the WHOLE photo is
   // pixelated (mosaic). Simple and complete: no OCR box can be missed. Nothing leaves the browser.
-  const PIXEL_BLOCK = 14;               // block size for a ~1000px photo
-  const PIXEL_BLOCKS_ACROSS = 70;       // keep the same chunkiness on high-resolution photos
+  // Classic "censor mosaic": square blocks, one solid colour each (the block's average).
+  // Canvas-based (no CSS blur): shrink so each block becomes one pixel, then scale back up
+  // with smoothing off. Fixed 22 px blocks on every image; never below 18 px.
+  const MOSAIC_BLOCK = 22;
+  const MOSAIC_MIN_BLOCK = 18;
 
-  /**
-   * Mosaic: fill each blockSize×blockSize cell with the cell's average colour.
-   * Reads the region once (one getImageData) instead of once per cell, so big photos stay fast.
-   */
-  function pixelateRegion(ctx, x, y, w, h, blockSize = 12) {
-    x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
-    w = Math.min(ctx.canvas.width - x, Math.ceil(w)); h = Math.min(ctx.canvas.height - y, Math.ceil(h));
-    if (w <= 0 || h <= 0) return;
-    const bs = Math.max(2, Math.round(blockSize));
-    const img = ctx.getImageData(x, y, w, h);
-    const d = img.data;
-    for (let by = 0; by < h; by += bs) {
-      const bh = Math.min(bs, h - by);
-      for (let bx = 0; bx < w; bx += bs) {
-        const bw = Math.min(bs, w - bx);
-        let r = 0, g = 0, b = 0;
-        for (let yy = by; yy < by + bh; yy++) {
-          for (let xx = bx, i = (yy * w + bx) * 4; xx < bx + bw; xx++, i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-        }
-        const n = bw * bh;
-        ctx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
-        ctx.fillRect(x + bx, y + by, bw, bh);
-      }
-    }
+  /** Pixelate the WHOLE canvas in place. blockSize is clamped to >= MOSAIC_MIN_BLOCK. */
+  function pixelateCanvas(canvas, blockSize = MOSAIC_BLOCK) {
+    const w = canvas.width, h = canvas.height;
+    if (!w || !h) return canvas;
+    const bs = Math.max(MOSAIC_MIN_BLOCK, Math.round(blockSize) || MOSAIC_BLOCK);
+    const ctx = canvas.getContext('2d');
+    const smallW = Math.ceil(w / bs), smallH = Math.ceil(h / bs);
+
+    // Step 1: shrunken copy, one pixel per block (the downscale averages the block's pixels).
+    const off = document.createElement('canvas');
+    off.width = smallW;
+    off.height = smallH;
+    const offCtx = off.getContext('2d');
+    offCtx.imageSmoothingEnabled = true;
+    offCtx.imageSmoothingQuality = 'high';
+    offCtx.drawImage(canvas, 0, 0, smallW, smallH);
+
+    // Step 2: back at full size, no smoothing = solid square blocks. Clear first so a
+    // semi-transparent block (PNG with alpha) can never show the original through it.
+    ctx.save();
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, smallW, smallH, 0, 0, w, h);
+    ctx.restore();
+    off.width = off.height = 0;
+    return canvas;
   }
 
   /**
@@ -739,8 +758,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(source, 0, 0);
     if (!((findings && findings.length > 0) || docType)) return { canvas, boxes: 0 };
-    const block = Math.max(PIXEL_BLOCK, Math.round(Math.max(canvas.width, canvas.height) / PIXEL_BLOCKS_ACROSS));
-    pixelateRegion(ctx, 0, 0, canvas.width, canvas.height, block);
+    pixelateCanvas(canvas, MOSAIC_BLOCK);
     return { canvas, boxes: 1 };
   }
 
@@ -933,35 +951,7 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     } else {
       const title = lang === 'id' ? '⚠️ Data sensitif terdeteksi di PDF' : '⚠️ Sensitive data detected in PDF';
       showResult('warn', title, ss.pdfWarnBody, [...new Set(r.findings.map((f) => f.label))]);
-      const ul = document.createElement('ul');
-      ul.className = 'img-pdf-findings small';
-      for (const f of r.findings) {
-        const li = document.createElement('li');
-        const src = [...new Set(f.sources.map((x) => (x === 'text' ? ss.srcText : ss.srcOcr)))].join(' + ');
-        li.textContent = `${f.label}: ${psMasker.partialValue(f.value)} (${src})`;
-        if (eduNote(f.type)) {
-          const edu = document.createElement('span');
-          edu.className = 'finding-edu';
-          edu.textContent = eduNote(f.type);
-          li.appendChild(edu);
-        }
-        ul.appendChild(li);
-      }
-      imgResult.appendChild(ul);
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = ss.pdfDownload;
-      btn.addEventListener('click', () => {
-        const url = URL.createObjectURL(new Blob([r.safeText], { type: 'text/plain' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'safe_' + (String(file.name || 'document').replace(/\.[^.]+$/, '') || 'document') + '.txt';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      });
-      imgResult.appendChild(btn);
+      showDocFindings(file, r, ss);
     }
     if (r.pages > psPdfScan.MAX_OCR_PAGES) {
       const note = document.createElement('p');
@@ -972,10 +962,91 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     return r;
   }
 
+  /** Per-finding list (label, partial value, where it was found) + "Download safe text (.txt)". PDF and Word. */
+  function showDocFindings(file, r, ss) {
+    const ul = document.createElement('ul');
+    ul.className = 'img-pdf-findings small';
+    for (const f of r.findings) {
+      const li = document.createElement('li');
+      const src = [...new Set(f.sources.map((x) => (x === 'text' ? ss.srcText : ss.srcOcr)))].join(' + ');
+      li.textContent = `${f.label}: ${psMasker.partialValue(f.value)} (${src})`;
+      if (eduNote(f.type)) {
+        const edu = document.createElement('span');
+        edu.className = 'finding-edu';
+        edu.textContent = eduNote(f.type);
+        li.appendChild(edu);
+      }
+      ul.appendChild(li);
+    }
+    imgResult.appendChild(ul);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = ss.pdfDownload;
+    btn.addEventListener('click', () => {
+      const url = URL.createObjectURL(new Blob([r.safeText], { type: 'text/plain' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'safe_' + (String(file.name || 'document').replace(/\.[^.]+$/, '') || 'document') + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    });
+    imgResult.appendChild(btn);
+  }
+
+  // ── Word (.docx): document text + OCR of every embedded picture, merged (src/shared/docx-scan.js) ──
+  async function handleDocxFile(file) {
+    const ss = SCAN_STR[lang] || SCAN_STR.id;
+    const seq = ++scanSeq;
+    imgResult.hidden = true;
+    imgResult.innerHTML = '';
+    imgPreview.hidden = true;
+    imgPreview.removeAttribute('src');
+    imgScanning.textContent = ss.docxScanning(0, 0);
+    imgScanning.hidden = false;
+
+    let r;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const st = settings || {};
+      r = await psDocxScan.scan(bytes, {
+        enabledTypes: st.enabledTypes,
+        confidenceThreshold: st.confidenceThreshold,
+        lang,
+        onImage: (i, n) => { if (seq === scanSeq) imgScanning.textContent = ss.docxScanning(i, n); }
+      });
+    } catch (_) {
+      if (seq !== scanSeq) return null;
+      imgScanning.hidden = true;
+      showResult('err', ss.docxErr, '');
+      return null;
+    }
+    if (seq !== scanSeq) return null;
+    imgScanning.hidden = true;
+
+    if (!r.findings.length) {
+      const empty = alnumCount(r.text) < 4 && !r.imagesScanned;
+      showResult(empty ? 'err' : 'ok', empty ? ss.docxNoText : (lang === 'id' ? '✅ Tidak ada data sensitif' : '✅ No sensitive data found'), empty ? '' : ss.docxOkBody, []);
+    } else {
+      showResult('warn', ss.docxTitle, ss.docxWarnBody, [...new Set(r.findings.map((f) => f.label))]);
+      showDocFindings(file, r, ss);
+    }
+    if (r.imagesSkipped) {
+      const note = document.createElement('p');
+      note.className = 'muted small';
+      note.textContent = ss.docxImgLimit(r.imagesSkipped);
+      imgResult.appendChild(note);
+    }
+    return r;
+  }
+
+  const isDocxFile = (file) => file.type === psDocxScan.DOCX_MIME || /\.docx$/i.test(file.name || '');
+
   async function handleFile(file) {
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
-    if (isPdf) {
-      const r = await handlePdfFile(file);
+    if (isPdf || isDocxFile(file)) {
+      const r = await (isPdf ? handlePdfFile(file) : handleDocxFile(file));
       if (r) addToSession(r.findings.length);          // the safe .txt masks every finding
       return r;
     }
@@ -984,6 +1055,60 @@ Tolong rapikan email komplain ini supaya sopan tapi tegas.`;
     else if (r && (r.status === 'clean' || r.status === 'notext')) addToSession(0);
     return r;
   }
+
+  // ── Upload guard results from chat sites (photo / PDF / Word), sent by the service worker ─────
+  // Same per-finding list as a file dropped here, labelled (text) / (image). Values arrive already
+  // partly hidden (e.g. 3171********0002); full values never leave the scanning page.
+  const UPLOAD_STR = {
+    id: {
+      head: (kind, site) => `Upload terakhir diperiksa (${kind}${site ? ' · ' + site : ''})`,
+      pii: '⚠️ Data sensitif terdeteksi — upload ditahan sampai kamu memilih di popup halaman.',
+      clean: '✅ Tidak ada data sensitif. Upload diteruskan.',
+      fail: '⚠️ File tidak bisa dipindai. Pilihan "Kirim tanpa pemindaian" atau "Batal" ada di popup halaman.',
+      kinds: { image: 'foto', pdf: 'PDF', docx: 'Word' }
+    },
+    en: {
+      head: (kind, site) => `Latest upload checked (${kind}${site ? ' · ' + site : ''})`,
+      pii: '⚠️ Sensitive data detected — the upload is on hold until you choose in the page popup.',
+      clean: '✅ No sensitive data found. The upload went through.',
+      fail: '⚠️ This file could not be scanned. "Send without scanning" or "Cancel" is in the page popup.',
+      kinds: { image: 'photo', pdf: 'PDF', docx: 'Word' }
+    }
+  };
+  const uploadLast = $('ps-upload-last');
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (!msg || msg.type !== 'PS_UPLOAD_SCAN_RESULT' || sender.id !== chrome.runtime.id || sender.tab) return false;
+    if (!uploadLast) return false;
+    const us = UPLOAD_STR[lang] || UPLOAD_STR.id;
+    const ss = SCAN_STR[lang] || SCAN_STR.id;
+    const findings = Array.isArray(msg.findings) ? msg.findings : [];
+    const state = !msg.success ? 'err' : msg.hasPII ? 'warn' : 'ok';
+    uploadLast.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = `img-result-card ${state}`;
+    const title = document.createElement('div');
+    title.className = 'img-result-title';
+    title.textContent = us.head(us.kinds[msg.kind] || msg.kind || '', msg.site || '');
+    const body = document.createElement('div');
+    body.className = 'img-result-body';
+    body.textContent = (msg.fileName ? msg.fileName + ': ' : '') + (state === 'err' ? us.fail : state === 'warn' ? us.pii : us.clean);
+    card.append(title, body);
+    if (findings.length) {
+      const ul = document.createElement('ul');
+      ul.className = 'img-pdf-findings small';
+      for (const f of findings) {
+        const li = document.createElement('li');
+        const label = ((PS_TYPE_LABELS[f.type] || {})[lang]) || f.type;
+        const src = [...new Set((f.sources || ['image']).map((x) => (x === 'text' ? ss.srcText : ss.srcOcr)))].join(' + ');
+        li.textContent = `${label}: ${String(f.display || '')} (${src})`;
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    uploadLast.appendChild(card);
+    uploadLast.hidden = false;
+    return false;
+  });
 
   // Apply scanner i18n once languages are loaded.
   applyScanI18n();
